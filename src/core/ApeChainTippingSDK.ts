@@ -1,6 +1,16 @@
 // packages/sdk/src/core/ApeChainTippingSDK.ts
 import { createThirdwebClient, getContract, prepareContractCall, readContract, ThirdwebClient } from 'thirdweb';
-import { Chain } from 'thirdweb/chains';
+import { 
+  Chain, 
+  ethereum, 
+  polygon, 
+  optimism, 
+  bsc, 
+  avalanche, 
+  base, 
+  arbitrum, 
+  defineChain 
+} from 'thirdweb/chains';
 import { ApeChainRelayService } from '../services/ApeChainRelayService';
 import { 
   MembershipTier,
@@ -538,8 +548,7 @@ export class ApeChainTippingSDK {
   }
 
   private getChainById(chainId: number): Chain {
-    // Import the actual chain objects from thirdweb/chains
-    const { ethereum, polygon, optimism, bsc, avalanche, base, arbitrum, defineChain } = require('thirdweb/chains');
+    // Chain objects are now imported at the top of the file
     
     const chainMap: Record<number, Chain> = {
       // Mainnet chains

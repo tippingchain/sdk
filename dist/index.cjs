@@ -1,14 +1,10 @@
 'use strict';
 
 var thirdweb = require('thirdweb');
+var chains = require('thirdweb/chains');
 var contractsInterface = require('@tippingchain/contracts-interface');
 
-var __require = /* @__PURE__ */ ((x) => typeof require !== "undefined" ? require : typeof Proxy !== "undefined" ? new Proxy(x, {
-  get: (a, b) => (typeof require !== "undefined" ? require : a)[b]
-}) : x)(function(x) {
-  if (typeof require !== "undefined") return require.apply(this, arguments);
-  throw Error('Dynamic require of "' + x + '" is not supported');
-});
+// src/core/ApeChainTippingSDK.ts
 var ApeChainRelayService = class {
   constructor() {
     this.APECHAIN_ID = contractsInterface.SUPPORTED_CHAINS.APECHAIN;
@@ -458,17 +454,16 @@ var ApeChainTippingSDK = class {
     return topCreators;
   }
   getChainById(chainId) {
-    const { ethereum, polygon, optimism, bsc, avalanche, base, arbitrum, defineChain } = __require("thirdweb/chains");
     const chainMap = {
       // Mainnet chains
-      1: ethereum,
-      137: polygon,
-      10: optimism,
-      56: bsc,
-      43114: avalanche,
-      8453: base,
-      42161: arbitrum,
-      2741: defineChain({
+      1: chains.ethereum,
+      137: chains.polygon,
+      10: chains.optimism,
+      56: chains.bsc,
+      43114: chains.avalanche,
+      8453: chains.base,
+      42161: chains.arbitrum,
+      2741: chains.defineChain({
         id: 2741,
         name: "Abstract",
         rpc: "https://api.testnet.abs.xyz",
@@ -478,7 +473,7 @@ var ApeChainTippingSDK = class {
           decimals: 18
         }
       }),
-      33139: defineChain({
+      33139: chains.defineChain({
         id: 33139,
         name: "ApeChain",
         rpc: "https://33139.rpc.thirdweb.com",
@@ -488,7 +483,7 @@ var ApeChainTippingSDK = class {
           decimals: 18
         }
       }),
-      167e3: defineChain({
+      167e3: chains.defineChain({
         id: 167e3,
         name: "Taiko",
         rpc: "https://rpc.mainnet.taiko.xyz",
@@ -499,7 +494,7 @@ var ApeChainTippingSDK = class {
         }
       }),
       // Testnets
-      17e3: defineChain({
+      17e3: chains.defineChain({
         id: 17e3,
         name: "Ethereum Holesky",
         rpc: "https://ethereum-holesky-rpc.publicnode.com",
@@ -509,7 +504,7 @@ var ApeChainTippingSDK = class {
           decimals: 18
         }
       }),
-      80002: defineChain({
+      80002: chains.defineChain({
         id: 80002,
         name: "Polygon Amoy",
         rpc: "https://rpc-amoy.polygon.technology",
@@ -519,7 +514,7 @@ var ApeChainTippingSDK = class {
           decimals: 18
         }
       }),
-      33111: defineChain({
+      33111: chains.defineChain({
         id: 33111,
         name: "ApeChain Curtis (Testnet)",
         rpc: "https://curtis.rpc.caldera.xyz/http",

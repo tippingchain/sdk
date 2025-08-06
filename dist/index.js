@@ -1,13 +1,9 @@
 import { createThirdwebClient, getContract, prepareContractCall, readContract } from 'thirdweb';
+import { defineChain, arbitrum, base, avalanche, bsc, optimism, polygon, ethereum } from 'thirdweb/chains';
 import { SUPPORTED_CHAINS, CONTRACT_CONSTANTS, getContractAddress } from '@tippingchain/contracts-interface';
 export { CONTRACT_CONSTANTS, MembershipTier, NETWORK_CONFIGS, RELAY_RECEIVER_ADDRESSES, SUPPORTED_CHAINS, SUPPORTED_TESTNETS, TIER_CREATOR_SHARES, getAllContractAddresses, getContractAddress, getRelayReceiverAddress, isContractDeployed } from '@tippingchain/contracts-interface';
 
-var __require = /* @__PURE__ */ ((x) => typeof require !== "undefined" ? require : typeof Proxy !== "undefined" ? new Proxy(x, {
-  get: (a, b) => (typeof require !== "undefined" ? require : a)[b]
-}) : x)(function(x) {
-  if (typeof require !== "undefined") return require.apply(this, arguments);
-  throw Error('Dynamic require of "' + x + '" is not supported');
-});
+// src/core/ApeChainTippingSDK.ts
 var ApeChainRelayService = class {
   constructor() {
     this.APECHAIN_ID = SUPPORTED_CHAINS.APECHAIN;
@@ -457,7 +453,6 @@ var ApeChainTippingSDK = class {
     return topCreators;
   }
   getChainById(chainId) {
-    const { ethereum, polygon, optimism, bsc, avalanche, base, arbitrum, defineChain } = __require("thirdweb/chains");
     const chainMap = {
       // Mainnet chains
       1: ethereum,
