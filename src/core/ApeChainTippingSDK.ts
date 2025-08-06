@@ -18,7 +18,10 @@ import type {
   ViewerRewardStats, 
   ViewerRewardsPlatformStats,
   ViewerInfo,
-  ViewerRegistration
+  ViewerRegistration,
+  RewardPoolParams,
+  RewardPoolResult,
+  RewardPoolCalculation
 } from '../types/viewer-rewards';
 
 export interface ApeChainTippingConfig {
@@ -220,7 +223,7 @@ export class ApeChainTippingSDK {
           console.warn(`Creator ID mismatch: expected ${creatorId}, got ${id} on chain ${chainId}`);
         }
       } catch (error) {
-        errors.push(`Chain ${chainId}: ${error.message}`);
+        errors.push(`Chain ${chainId}: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
 
@@ -711,7 +714,7 @@ export class ApeChainTippingSDK {
       // Get USDC conversion estimate via relay service
       const relayQuote = await this.relayService.getQuote({
         fromChainId: chainId,
-        fromToken: params.token === 'native' ? 'native' : params.token,
+        fromToken: params.token === 'native' ? 'native' : (params.token || 'native'),
         toChainId: SUPPORTED_CHAINS.APECHAIN,
         toToken: 'USDC',
         amount: viewerAmount.toString()
@@ -743,7 +746,7 @@ export class ApeChainTippingSDK {
           transaction = prepareContractCall({
             contract,
             method: "function rewardViewerByIdETH(uint256 viewerId, string reason)",
-            params: [viewerId, params.reason || ""],
+            params: [BigInt(Number(viewerId)), params.reason || ""],
             value: amountBigInt
           });
         } else {
@@ -1166,8 +1169,8 @@ export class ApeChainTippingSDK {
     }
 
     // Remove duplicates and validate addresses
-    const uniqueViewers = [...new Set(viewerAddresses)].filter(addr => 
-      addr && addr.startsWith('0x') && addr.length === 42
+    const uniqueViewers = [...new Set(viewerAddresses)].filter((addr): addr is string => 
+      typeof addr === 'string' && addr.startsWith('0x') && addr.length === 42
     );
 
     if (uniqueViewers.length === 0) {
