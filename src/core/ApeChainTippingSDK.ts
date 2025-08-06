@@ -1,0 +1,1334 @@
+// packages/sdk/src/core/ApeChainTippingSDK.ts
+import { createThirdwebClient, getContract, prepareContractCall, readContract, ThirdwebClient } from 'thirdweb';
+import { Chain } from 'thirdweb/chains';
+import { ApeChainRelayService } from '../services/ApeChainRelayService';
+import { 
+  MembershipTier,
+  STREAMING_PLATFORM_TIPPING_ABI,
+  CONTRACT_CONSTANTS,
+  SUPPORTED_CHAINS,
+  SUPPORTED_TESTNETS,
+  getContractAddress,
+  isContractDeployed
+} from '@tippingchain/contracts-interface';
+import type { 
+  ViewerRewardParams, 
+  BatchViewerRewardParams, 
+  ViewerRewardResult, 
+  ViewerRewardStats, 
+  ViewerRewardsPlatformStats,
+  ViewerInfo,
+  ViewerRegistration
+} from '../types/viewer-rewards';
+
+export interface ApeChainTippingConfig {
+  clientId: string;
+  environment: 'development' | 'production';
+  streamingPlatformAddresses?: Record<number, string>; // Optional - can use default addresses from interface
+  useTestnet?: boolean; // Use testnet addresses
+}
+
+// Re-export MembershipTier from contracts-interface
+export { MembershipTier } from '@tippingchain/contracts-interface';
+
+export interface Creator {
+  id: number;
+  wallet: string;
+  active: boolean;
+  totalTips: string;
+  tipCount: number;
+  tier?: MembershipTier;
+  creatorShareBps?: number; // Creator share in basis points
+}
+
+export interface TipParams {
+  sourceChainId: number;
+  creatorId: number; // NEW: Use creator ID instead of address
+  token: string; // address or 'native'
+  amount: string;
+}
+
+export interface TipResult {
+  success: boolean;
+  sourceTransactionHash?: string;
+  relayId?: string;
+  estimatedUsdcAmount?: string;
+  creatorId?: number;
+  error?: string;
+}
+
+export interface CreatorRegistration {
+  creatorWallet: string;
+  tier: MembershipTier;
+  thirdwebId?: string; // Optional thirdweb account ID
+  chainId?: number; // Optional - if not specified, registers on all deployed chains
+}
+
+export interface TipSplits {
+  platformFee: string;
+  creatorAmount: string;
+  businessAmount: string;
+}
+
+export interface PlatformStats {
+  totalTips: string;
+  totalCount: number;
+  totalRelayed: string;
+  activeCreators: number;
+  autoRelayEnabled: boolean;
+}
+
+export class ApeChainTippingSDK {
+  private client: ThirdwebClient;
+  private config: ApeChainTippingConfig;
+  private relayService: ApeChainRelayService;
+
+  constructor(config: ApeChainTippingConfig) {
+    if (!config.clientId) {
+      throw new Error('clientId is required');
+    }
+    // streamingPlatformAddresses is now optional - we can use defaults from contracts-interface
+    
+    this.config = config;
+    this.client = createThirdwebClient({ clientId: config.clientId });
+    this.relayService = new ApeChainRelayService();
+  }
+
+  private getContractAddress(chainId: number): string | undefined {
+    // First check if custom addresses were provided in config
+    if (this.config.streamingPlatformAddresses && this.config.streamingPlatformAddresses[chainId]) {
+      return this.config.streamingPlatformAddresses[chainId];
+    }
+    // Otherwise use default addresses from contracts-interface
+    return getContractAddress(chainId, this.config.useTestnet || false);
+  }
+
+  async sendTip(params: TipParams): Promise<TipResult> {
+    try {
+      // 1. Get unified contract
+      const contractAddress = this.getContractAddress(params.sourceChainId);
+      if (!contractAddress) {
+        throw new Error(`Source chain ${params.sourceChainId} not supported or contract not deployed`);
+      }
+
+      // 2. Validate creator exists and is active
+      const creator = await this.getCreator(params.creatorId, params.sourceChainId);
+      if (!creator.active) {
+        throw new Error(`Creator ${params.creatorId} is not active`);
+      }
+
+      // 3. Execute tip transaction on unified contract
+      const chain = this.getChainById(params.sourceChainId);
+      const contract = getContract({
+        client: this.client,
+        chain,
+        address: contractAddress,
+      });
+
+      let transaction;
+      if (params.token === 'native') {
+        transaction = prepareContractCall({
+          contract,
+          method: "function tipCreatorETH(uint256 creatorId)",
+          params: [BigInt(params.creatorId)],
+          value: BigInt(params.amount),
+        });
+      } else {
+        transaction = prepareContractCall({
+          contract,
+          method: "function tipCreatorToken(uint256 creatorId, address token, uint256 amount)",
+          params: [BigInt(params.creatorId), params.token, BigInt(params.amount)],
+        });
+      }
+
+      // 4. Execute transaction (this would be done by the connected wallet)
+      const result = await this.executeTransaction(transaction);
+
+      // 5. Get relay information for USDC conversion  
+      const relayResult = await this.relayService.relayTipToApeChain({
+        fromChainId: params.sourceChainId,
+        fromToken: params.token,
+        amount: params.amount,
+        creatorAddress: creator.wallet, // Use actual creator wallet from registry
+        targetToken: 'USDC' // Target USDC on ApeChain
+      });
+
+      return {
+        success: true,
+        sourceTransactionHash: (result as any).transactionHash,
+        relayId: relayResult.relayId,
+        creatorId: params.creatorId,
+        estimatedUsdcAmount: relayResult.estimatedUsdcAmount || '0',
+      };
+
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+    }
+  }
+
+  // Creator management methods
+  async addCreator(registration: CreatorRegistration): Promise<number> {
+    // If chainId is specified, only register on that chain
+    if (registration.chainId) {
+      return this.addCreatorToChain(
+        registration.creatorWallet, 
+        registration.tier, 
+        registration.thirdwebId,
+        registration.chainId
+      );
+    }
+
+    // Otherwise, register on all supported source chains
+    const sourceChains = [
+      SUPPORTED_CHAINS.ETHEREUM,
+      SUPPORTED_CHAINS.POLYGON,
+      SUPPORTED_CHAINS.OPTIMISM,
+      SUPPORTED_CHAINS.BSC,
+      SUPPORTED_CHAINS.ABSTRACT,
+      SUPPORTED_CHAINS.AVALANCHE,
+      SUPPORTED_CHAINS.BASE,
+      SUPPORTED_CHAINS.ARBITRUM,
+      SUPPORTED_CHAINS.TAIKO
+    ];
+
+    let creatorId: number | null = null;
+    const errors: string[] = [];
+
+    // Register creator on all chains
+    for (const chainId of sourceChains) {
+      try {
+        const contractAddress = this.getContractAddress(chainId);
+        if (!contractAddress) {
+          console.warn(`Chain ${chainId} not deployed, skipping`);
+          continue;
+        }
+
+        const id = await this.addCreatorToChain(
+          registration.creatorWallet, 
+          registration.tier,
+          registration.thirdwebId, 
+          chainId
+        );
+        
+        // All chains should return the same creator ID
+        if (creatorId === null) {
+          creatorId = id;
+        } else if (creatorId !== id) {
+          console.warn(`Creator ID mismatch: expected ${creatorId}, got ${id} on chain ${chainId}`);
+        }
+      } catch (error) {
+        errors.push(`Chain ${chainId}: ${error.message}`);
+      }
+    }
+
+    if (creatorId === null) {
+      throw new Error(`Failed to register creator on any chain. Errors: ${errors.join(', ')}`);
+    }
+
+    return creatorId;
+  }
+
+  private async addCreatorToChain(
+    creatorWallet: string, 
+    tier: MembershipTier, 
+    thirdwebId: string | undefined,
+    chainId: number
+  ): Promise<number> {
+    const contractAddress = this.getContractAddress(chainId);
+    
+    if (!contractAddress) {
+      throw new Error(`Chain ${chainId} not supported for creator registration or contract not deployed`);
+    }
+
+    const chain = this.getChainById(chainId);
+    const contract = getContract({
+      client: this.client,
+      chain,
+      address: contractAddress,
+    });
+
+    const transaction = prepareContractCall({
+      contract,
+      method: "function addCreator(address creatorWallet, uint8 tier, string thirdwebId)",
+      params: [creatorWallet, tier, thirdwebId || ""],
+    });
+
+    await this.executeTransaction(transaction);
+    
+    // In production, you'd parse the CreatorAdded event to get the actual creator ID
+    // For now, we'll simulate by reading from contract
+    const creatorId = await this.readContract(contract, "getCreatorByWallet", [creatorWallet]);
+    return Number(creatorId);
+  }
+
+  async getCreator(creatorId: number, chainId: number): Promise<Creator> {
+    const contractAddress = this.getContractAddress(chainId);
+    if (!contractAddress) {
+      throw new Error(`Chain ${chainId} not supported or contract not deployed`);
+    }
+
+    const chain = this.getChainById(chainId);
+    const contract = getContract({
+      client: this.client,
+      chain,
+      address: contractAddress,
+    });
+
+    const creatorInfo = await this.readContract(contract, "getCreatorInfo", [BigInt(creatorId)]) as [string, boolean, bigint, bigint, number, bigint];
+    
+    return {
+      id: creatorId,
+      wallet: creatorInfo[0], // wallet
+      active: creatorInfo[1], // active
+      totalTips: creatorInfo[2].toString(), // totalTips
+      tipCount: Number(creatorInfo[3]), // tipCount
+      tier: creatorInfo[4] as MembershipTier, // tier
+      creatorShareBps: Number(creatorInfo[5]) // creatorShareBps
+    };
+  }
+
+  async getCreatorByWallet(walletAddress: string, chainId: number): Promise<Creator | null> {
+    const contractAddress = this.getContractAddress(chainId);
+    if (!contractAddress) {
+      throw new Error(`Chain ${chainId} not supported or contract not deployed`);
+    }
+
+    const chain = this.getChainById(chainId);
+    const contract = getContract({
+      client: this.client,
+      chain,
+      address: contractAddress,
+    });
+
+    const creatorId = await this.readContract(contract, "getCreatorByWallet", [walletAddress]);
+    
+    if (Number(creatorId) === 0) {
+      return null; // Creator not found
+    }
+
+    return this.getCreator(Number(creatorId), chainId);
+  }
+
+  /**
+   * Get creator by thirdweb account ID
+   * @param thirdwebId Thirdweb account ID
+   * @param chainId Chain ID
+   * @returns Creator information or null if not found
+   */
+  async getCreatorByThirdwebId(thirdwebId: string, chainId: number): Promise<Creator | null> {
+    const contractAddress = this.getContractAddress(chainId);
+    if (!contractAddress) {
+      throw new Error(`Chain ${chainId} not supported or contract not deployed`);
+    }
+
+    const chain = this.getChainById(chainId);
+    const contract = getContract({
+      client: this.client,
+      chain,
+      address: contractAddress,
+    });
+
+    const creatorId = await this.readContract(contract, "getCreatorByThirdwebId", [thirdwebId]);
+    
+    if (Number(creatorId) === 0) {
+      return null; // Creator not found
+    }
+
+    return this.getCreator(Number(creatorId), chainId);
+  }
+
+  async updateCreatorWallet(creatorId: number, newWallet: string, chainId: number): Promise<boolean> {
+    const contractAddress = this.getContractAddress(chainId);
+    if (!contractAddress) {
+      throw new Error(`Chain ${chainId} not supported or contract not deployed`);
+    }
+
+    const chain = this.getChainById(chainId);
+    const contract = getContract({
+      client: this.client,
+      chain,
+      address: contractAddress,
+    });
+
+    const transaction = prepareContractCall({
+      contract,
+      method: "function updateCreatorWallet(uint256 creatorId, address newWallet)",
+      params: [BigInt(creatorId), newWallet],
+    });
+
+    const result = await this.executeTransaction(transaction);
+    return (result as any).success;
+  }
+
+  async updateCreatorTier(creatorId: number, newTier: MembershipTier, chainId: number): Promise<boolean> {
+    const contractAddress = this.getContractAddress(chainId);
+    if (!contractAddress) {
+      throw new Error(`Chain ${chainId} not supported or contract not deployed`);
+    }
+
+    const chain = this.getChainById(chainId);
+    const contract = getContract({
+      client: this.client,
+      chain,
+      address: contractAddress,
+    });
+
+    const transaction = prepareContractCall({
+      contract,
+      method: "function updateCreatorTier(uint256 creatorId, uint8 newTier)",
+      params: [BigInt(creatorId), newTier],
+    });
+
+    const result = await this.executeTransaction(transaction);
+    return (result as any).success;
+  }
+
+  async calculateTipSplits(creatorId: number, tipAmount: string, chainId: number): Promise<TipSplits> {
+    const contractAddress = this.getContractAddress(chainId);
+    if (!contractAddress) {
+      throw new Error(`Chain ${chainId} not supported or contract not deployed`);
+    }
+
+    const chain = this.getChainById(chainId);
+    const contract = getContract({
+      client: this.client,
+      chain,
+      address: contractAddress,
+    });
+
+    const result = await this.readContract(
+      contract, 
+      "calculateTipSplits", 
+      [BigInt(creatorId), BigInt(tipAmount)]
+    ) as [bigint, bigint, bigint];
+
+    return {
+      platformFee: result[0].toString(),
+      creatorAmount: result[1].toString(),
+      businessAmount: result[2].toString()
+    };
+  }
+
+  async getCreatorUsdcBalanceOnApeChain(creatorAddress: string): Promise<string> {
+    const apeChainAddress = this.getContractAddress(SUPPORTED_CHAINS.APECHAIN);
+    if (!apeChainAddress) {
+      throw new Error('ApeChain contract not deployed or configured');
+    }
+
+    const contract = getContract({
+      client: this.client,
+      chain: this.getChainById(SUPPORTED_CHAINS.APECHAIN), // ApeChain
+      address: apeChainAddress,
+    });
+
+    const balances = await this.readContract(contract, "getBalances", [creatorAddress]) as [bigint, bigint];
+    return balances[1].toString(); // usdcBalance is the second return value
+  }
+
+  async getPlatformStats(chainId: number): Promise<PlatformStats> {
+    const contractAddress = this.getContractAddress(chainId);
+    if (!contractAddress) {
+      throw new Error(`Chain ${chainId} not supported or contract not deployed`);
+    }
+
+    const chain = this.getChainById(chainId);
+    const contract = getContract({
+      client: this.client,
+      chain,
+      address: contractAddress,
+    });
+
+    const stats = await this.readContract(contract, "getPlatformStats", []) as [bigint, bigint, bigint, bigint, boolean];
+    
+    return {
+      totalTips: stats[0].toString(),
+      totalCount: Number(stats[1]),
+      totalRelayed: stats[2].toString(),
+      activeCreators: Number(stats[3]),
+      autoRelayEnabled: stats[4]
+    };
+  }
+
+  async getTopCreators(limit: number = 10, chainId: number): Promise<Creator[]> {
+    const contractAddress = this.getContractAddress(chainId);
+    if (!contractAddress) {
+      throw new Error(`Chain ${chainId} not supported or contract not deployed`);
+    }
+
+    const chain = this.getChainById(chainId);
+    const contract = getContract({
+      client: this.client,
+      chain,
+      address: contractAddress,
+    });
+
+    // Fetch all active creators in batches and sort client-side
+    const batchSize = 100;
+    let offset = 0;
+    const allCreators: Creator[] = [];
+    
+    while (true) {
+      const result = await this.readContract(
+        contract, 
+        "getAllActiveCreators", 
+        [BigInt(offset), BigInt(batchSize)]
+      ) as [bigint[], string[], bigint[], bigint];
+      
+      const [creatorIds, wallets, tipAmounts, totalActive] = result;
+      
+      // Add creators from this batch
+      for (let i = 0; i < creatorIds.length; i++) {
+        allCreators.push({
+          id: Number(creatorIds[i]),
+          wallet: wallets[i],
+          active: true, // getAllActiveCreators only returns active creators
+          totalTips: tipAmounts[i].toString(),
+          tipCount: 0 // Not returned by this method, would need getCreatorInfo for full details
+        });
+      }
+      
+      offset += batchSize;
+      
+      // Check if we've fetched all creators
+      if (offset >= Number(totalActive) || creatorIds.length < batchSize) {
+        break;
+      }
+    }
+    
+    // Sort by totalTips descending (using bigint comparison for accuracy)
+    allCreators.sort((a, b) => {
+      const aTips = BigInt(a.totalTips);
+      const bTips = BigInt(b.totalTips);
+      
+      if (bTips > aTips) return 1;
+      if (bTips < aTips) return -1;
+      return 0;
+    });
+    
+    // Take top N creators
+    const topCreators = allCreators.slice(0, limit);
+    
+    // If needed, fetch full details for the top creators
+    if (topCreators.length > 0 && topCreators[0].tipCount === 0) {
+      // Optionally fetch full creator info including tipCount
+      const creatorIdList = topCreators.map(c => BigInt(c.id));
+      const detailsResult = await this.readContract(
+        contract,
+        "getCreatorsByIds",
+        [creatorIdList]
+      ) as [bigint[], string[], boolean[]];
+      
+      const [tipAmounts, wallets, activeStatus] = detailsResult;
+      
+      // Update with fresh data
+      for (let i = 0; i < topCreators.length; i++) {
+        topCreators[i].totalTips = tipAmounts[i].toString();
+        topCreators[i].wallet = wallets[i];
+        topCreators[i].active = activeStatus[i];
+      }
+    }
+    
+    return topCreators;
+  }
+
+  private getChainById(chainId: number): Chain {
+    // Import the actual chain objects from thirdweb/chains
+    const { ethereum, polygon, optimism, bsc, avalanche, base, arbitrum, defineChain } = require('thirdweb/chains');
+    
+    const chainMap: Record<number, Chain> = {
+      // Mainnet chains
+      1: ethereum,
+      137: polygon,
+      10: optimism,
+      56: bsc,
+      43114: avalanche,
+      8453: base,
+      42161: arbitrum,
+      2741: defineChain({
+        id: 2741,
+        name: 'Abstract',
+        rpc: 'https://api.testnet.abs.xyz',
+        nativeCurrency: {
+          name: 'Ethereum',
+          symbol: 'ETH',
+          decimals: 18,
+        },
+      }),
+      33139: defineChain({
+        id: 33139,
+        name: 'ApeChain',
+        rpc: 'https://33139.rpc.thirdweb.com',
+        nativeCurrency: {
+          name: 'APE',
+          symbol: 'APE',
+          decimals: 18,
+        },
+      }),
+      167000: defineChain({
+        id: 167000,
+        name: 'Taiko',
+        rpc: 'https://rpc.mainnet.taiko.xyz',
+        nativeCurrency: {
+          name: 'Ethereum',
+          symbol: 'ETH',
+          decimals: 18,
+        },
+      }),
+      // Testnets
+      17000: defineChain({
+        id: 17000,
+        name: 'Ethereum Holesky',
+        rpc: 'https://ethereum-holesky-rpc.publicnode.com',
+        nativeCurrency: {
+          name: 'Ethereum',
+          symbol: 'ETH',
+          decimals: 18,
+        },
+      }),
+      80002: defineChain({
+        id: 80002,
+        name: 'Polygon Amoy',
+        rpc: 'https://rpc-amoy.polygon.technology',
+        nativeCurrency: {
+          name: 'MATIC',
+          symbol: 'MATIC',
+          decimals: 18,
+        },
+      }),
+      33111: defineChain({
+        id: 33111,
+        name: 'ApeChain Curtis (Testnet)',
+        rpc: 'https://curtis.rpc.caldera.xyz/http',
+        nativeCurrency: {
+          name: 'APE',
+          symbol: 'APE',
+          decimals: 18,
+        },
+      }),
+    };
+    
+    const chain = chainMap[chainId];
+    if (!chain) {
+      throw new Error(`Unsupported chain ID: ${chainId}`);
+    }
+    
+    return chain;
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  private async executeTransaction(_transaction: unknown): Promise<Record<string, unknown>> {
+    // This method should be called with a connected wallet
+    // For now, we'll return a mock response indicating the transaction needs to be executed
+    // In a real implementation, this would use the thirdweb SDK to execute the transaction
+    return {
+      transactionHash: '0x' + Math.random().toString(16).substr(2, 64),
+      blockNumber: Math.floor(Math.random() * 1000000),
+      success: true,
+    };
+  }
+
+  private async readContract(contract: unknown, method: string, params: unknown[]): Promise<unknown> {
+    try {
+      // Use thirdweb's readContract function
+      const result = await readContract({
+        contract: contract as any,
+        method,
+        params,
+      });
+      return result;
+    } catch (error) {
+      throw new Error(`Failed to read contract: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+
+  // ============ Viewer Rewards Methods ============
+  
+  /**
+   * Register a new viewer with optional thirdweb ID
+   * @param registration Viewer registration parameters
+   * @returns The assigned viewer ID
+   */
+  async registerViewer(registration: ViewerRegistration): Promise<number> {
+    const chainId = registration.chainId || SUPPORTED_CHAINS.POLYGON;
+    const contractAddress = this.getContractAddress(chainId);
+    
+    if (!contractAddress) {
+      throw new Error(`Chain ${chainId} not supported`);
+    }
+
+    const chain = this.getChainById(chainId);
+    const contract = getContract({
+      client: this.client,
+      chain,
+      address: contractAddress,
+    });
+
+    const transaction = prepareContractCall({
+      contract,
+      method: "function registerViewer(address viewerWallet, string thirdwebId)",
+      params: [registration.walletAddress, registration.thirdwebId || ""],
+    });
+
+    const result = await this.executeTransaction(transaction);
+    
+    // In production, parse the ViewerRegistered event to get the actual viewer ID
+    // For now, we'll simulate by reading from contract
+    const viewerId = await this.readContract(contract, "getViewerByWallet", [registration.walletAddress]);
+    return Number(viewerId);
+  }
+
+  /**
+   * Send a reward to a viewer
+   * @param params Viewer reward parameters
+   * @returns Transaction result
+   */
+  async rewardViewer(params: ViewerRewardParams): Promise<ViewerRewardResult> {
+    const chainId = params.chainId || SUPPORTED_CHAINS.POLYGON;
+    const contractAddress = this.getContractAddress(chainId);
+    
+    if (!contractAddress) {
+      throw new Error(`Chain ${chainId} not supported`);
+    }
+
+    const chain = this.getChainById(chainId);
+    const contract = getContract({
+      client: this.client,
+      chain,
+      address: contractAddress,
+    });
+
+    try {
+      let transaction;
+      const amountBigInt = BigInt(params.amount);
+      
+      // Calculate fees
+      const platformFee = (amountBigInt * BigInt(100)) / BigInt(10000); // 1%
+      const viewerAmount = amountBigInt - platformFee;
+      
+      // Get USDC conversion estimate via relay service
+      const relayQuote = await this.relayService.getQuote({
+        fromChainId: chainId,
+        fromToken: params.token === 'native' ? 'native' : params.token,
+        toChainId: SUPPORTED_CHAINS.APECHAIN,
+        toToken: 'USDC',
+        amount: viewerAmount.toString()
+      });
+      
+      const estimatedUsdcAmount = relayQuote.estimatedOutput;
+      
+      // Determine which reward method to use based on identifier type
+      if (params.viewerId) {
+        // Use viewer ID directly
+        if (params.token === 'native' || !params.token) {
+          transaction = prepareContractCall({
+            contract,
+            method: "function rewardViewerByIdETH(uint256 viewerId, string reason)",
+            params: [BigInt(params.viewerId), params.reason || ""],
+            value: amountBigInt
+          });
+        } else {
+          throw new Error("Token rewards by ID not yet implemented");
+        }
+      } else if (params.thirdwebId) {
+        // Resolve thirdweb ID to viewer ID first
+        const viewerId = await this.readContract(contract, "getViewerByThirdwebId", [params.thirdwebId]);
+        if (Number(viewerId) === 0) {
+          throw new Error(`No viewer found for thirdweb ID: ${params.thirdwebId}`);
+        }
+        
+        if (params.token === 'native' || !params.token) {
+          transaction = prepareContractCall({
+            contract,
+            method: "function rewardViewerByIdETH(uint256 viewerId, string reason)",
+            params: [viewerId, params.reason || ""],
+            value: amountBigInt
+          });
+        } else {
+          throw new Error("Token rewards by ID not yet implemented");
+        }
+      } else if (params.viewerAddress) {
+        // Direct address (existing flow)
+        if (params.token === 'native' || !params.token) {
+          transaction = prepareContractCall({
+            contract,
+            method: "function rewardViewerETH(address viewer, string reason)",
+            params: [params.viewerAddress, params.reason || ""],
+            value: amountBigInt
+          });
+        } else {
+          // ERC20 token reward
+          await this.approveTokenIfNeeded(params.token, contractAddress, params.amount, chainId);
+          
+          transaction = prepareContractCall({
+            contract,
+            method: "function rewardViewerToken(address viewer, address token, uint256 amount, string reason)",
+            params: [params.viewerAddress, params.token, amountBigInt, params.reason || ""]
+          });
+        }
+      } else {
+        throw new Error('Must provide viewerId, thirdwebId, or viewerAddress');
+      }
+
+      const result = await this.executeTransaction(transaction);
+      
+      return {
+        success: true,
+        transactionHash: result.transactionHash as string,
+        chainId,
+        viewerAmount: viewerAmount.toString(),
+        platformFee: platformFee.toString(),
+        estimatedUsdcAmount,
+        destinationChain: SUPPORTED_CHAINS.APECHAIN
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+    }
+  }
+
+  /**
+   * Batch reward multiple viewers (gas efficient)
+   * @param params Batch viewer reward parameters
+   * @returns Transaction result
+   */
+  async batchRewardViewers(params: BatchViewerRewardParams): Promise<ViewerRewardResult> {
+    const chainId = params.chainId || SUPPORTED_CHAINS.POLYGON;
+    const contractAddress = this.getContractAddress(chainId);
+    
+    if (!contractAddress) {
+      throw new Error(`Chain ${chainId} not supported`);
+    }
+
+    if (params.viewers.length > 50) {
+      throw new Error("Too many viewers in batch (max 50)");
+    }
+
+    if (params.viewers.length === 0) {
+      throw new Error("No viewers provided");
+    }
+
+    const chain = this.getChainById(chainId);
+    const contract = getContract({
+      client: this.client,
+      chain,
+      address: contractAddress,
+    });
+
+    // Resolve all viewer identifiers to IDs or addresses
+    const resolvedViewers: Array<{ isId: boolean; identifier: string | bigint }> = [];
+    const amounts = params.viewers.map(v => BigInt(v.amount));
+    const reasons = params.viewers.map(v => v.reason || "");
+    const totalAmount = amounts.reduce((sum, amount) => sum + amount, BigInt(0));
+    
+    // Resolve each viewer to either an ID or address
+    for (const viewer of params.viewers) {
+      if (viewer.viewerId) {
+        resolvedViewers.push({ isId: true, identifier: BigInt(viewer.viewerId) });
+      } else if (viewer.thirdwebId) {
+        const viewerId = await this.readContract(
+          contract,
+          "getViewerByThirdwebId",
+          [viewer.thirdwebId]
+        ) as bigint;
+        if (viewerId === BigInt(0)) {
+          throw new Error(`No viewer found for thirdweb ID: ${viewer.thirdwebId}`);
+        }
+        resolvedViewers.push({ isId: true, identifier: viewerId });
+      } else if (viewer.address) {
+        resolvedViewers.push({ isId: false, identifier: viewer.address });
+      } else {
+        throw new Error('Each viewer must have viewerId, thirdwebId, or address');
+      }
+    }
+    
+    // Check if all are IDs or all are addresses
+    const allIds = resolvedViewers.every(v => v.isId);
+    const allAddresses = resolvedViewers.every(v => !v.isId);
+    
+    if (!allIds && !allAddresses) {
+      throw new Error('Cannot mix viewer IDs and addresses in batch rewards');
+    }
+
+    try {
+      let transaction;
+      
+      if (allIds) {
+        // Use batch reward by IDs
+        const viewerIds = resolvedViewers.map(v => v.identifier as bigint);
+        transaction = prepareContractCall({
+          contract,
+          method: "function batchRewardViewersByIdETH(uint256[] viewerIds, uint256[] amounts, string[] reasons)",
+          params: [viewerIds, amounts, reasons],
+          value: totalAmount
+        });
+      } else {
+        // Use batch reward by addresses
+        const viewerAddresses = resolvedViewers.map(v => v.identifier as string);
+        transaction = prepareContractCall({
+          contract,
+          method: "function batchRewardViewersETH(address[] viewers, uint256[] amounts, string[] reasons)",
+          params: [viewerAddresses, amounts, reasons],
+          value: totalAmount
+        });
+      }
+
+      const result = await this.executeTransaction(transaction);
+      
+      // Calculate total fees
+      const totalFee = (totalAmount * BigInt(100)) / BigInt(10000); // 1%
+      const totalToViewers = totalAmount - totalFee;
+      
+      // Get USDC conversion estimate for batch
+      const relayQuote = await this.relayService.getQuote({
+        fromChainId: chainId,
+        fromToken: 'native',
+        toChainId: SUPPORTED_CHAINS.APECHAIN,
+        toToken: 'USDC',
+        amount: totalToViewers.toString()
+      });
+      
+      const estimatedUsdcAmount = relayQuote.estimatedOutput;
+      
+      return {
+        success: true,
+        transactionHash: result.transactionHash as string,
+        chainId,
+        viewerAmount: totalToViewers.toString(),
+        platformFee: totalFee.toString(),
+        estimatedUsdcAmount,
+        destinationChain: SUPPORTED_CHAINS.APECHAIN
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+    }
+  }
+
+  /**
+   * Get viewer reward statistics for an address
+   * @param address Address to check (can be creator or viewer)
+   * @param chainId Chain ID
+   * @returns Viewer reward statistics
+   */
+  async getViewerRewardStats(address: string, chainId: number): Promise<ViewerRewardStats> {
+    const contractAddress = this.getContractAddress(chainId);
+    
+    if (!contractAddress) {
+      throw new Error(`Chain ${chainId} not supported`);
+    }
+
+    const chain = this.getChainById(chainId);
+    const contract = getContract({
+      client: this.client,
+      chain,
+      address: contractAddress,
+    });
+
+    const result = await this.readContract(contract, "getViewerRewardStats", [address]) as [bigint, bigint, bigint];
+
+    return {
+      totalRewardsGiven: result[0].toString(),
+      totalRewardsReceived: result[1].toString(),
+      rewardCount: Number(result[2])
+    };
+  }
+
+  /**
+   * Check if viewer rewards are enabled on a chain
+   * @param chainId Chain ID
+   * @returns Whether viewer rewards are enabled
+   */
+  async areViewerRewardsEnabled(chainId: number): Promise<boolean> {
+    const contractAddress = this.getContractAddress(chainId);
+    
+    if (!contractAddress) {
+      throw new Error(`Chain ${chainId} not supported`);
+    }
+
+    const chain = this.getChainById(chainId);
+    const contract = getContract({
+      client: this.client,
+      chain,
+      address: contractAddress,
+    });
+
+    return await this.readContract(contract, "viewerRewardsEnabled", []) as boolean;
+  }
+
+  /**
+   * Get platform-wide viewer rewards statistics
+   * @param chainId Chain ID
+   * @returns Platform viewer rewards statistics
+   */
+  async getViewerRewardsPlatformStats(chainId: number): Promise<ViewerRewardsPlatformStats> {
+    const contractAddress = this.getContractAddress(chainId);
+    
+    if (!contractAddress) {
+      throw new Error(`Chain ${chainId} not supported`);
+    }
+
+    const chain = this.getChainById(chainId);
+    const contract = getContract({
+      client: this.client,
+      chain,
+      address: contractAddress,
+    });
+
+    const result = await this.readContract(contract, "getViewerRewardsPlatformStats", []) as [bigint, boolean, bigint];
+
+    return {
+      totalRewards: result[0].toString(),
+      rewardsEnabled: result[1],
+      platformFeeRate: Number(result[2])
+    };
+  }
+
+  /**
+   * Get viewer information by ID
+   * @param viewerId Viewer's unique ID
+   * @param chainId Chain ID
+   * @returns Viewer information
+   */
+  async getViewer(viewerId: number, chainId: number): Promise<ViewerInfo | null> {
+    const contractAddress = this.getContractAddress(chainId);
+    
+    if (!contractAddress) {
+      throw new Error(`Chain ${chainId} not supported`);
+    }
+
+    const chain = this.getChainById(chainId);
+    const contract = getContract({
+      client: this.client,
+      chain,
+      address: contractAddress,
+    });
+
+    const result = await this.readContract(contract, "getViewerInfo", [BigInt(viewerId)]) as [string, bigint];
+    const [wallet, totalReceived] = result;
+    
+    if (wallet === '0x0000000000000000000000000000000000000000') {
+      return null;
+    }
+
+    return {
+      id: viewerId,
+      wallet,
+      totalReceived: totalReceived.toString()
+    };
+  }
+
+  /**
+   * Get viewer by wallet address
+   * @param walletAddress Wallet address
+   * @param chainId Chain ID
+   * @returns Viewer information or null if not found
+   */
+  async getViewerByWallet(walletAddress: string, chainId: number): Promise<ViewerInfo | null> {
+    const contractAddress = this.getContractAddress(chainId);
+    
+    if (!contractAddress) {
+      throw new Error(`Chain ${chainId} not supported`);
+    }
+
+    const chain = this.getChainById(chainId);
+    const contract = getContract({
+      client: this.client,
+      chain,
+      address: contractAddress,
+    });
+
+    const viewerId = await this.readContract(contract, "getViewerByWallet", [walletAddress]) as bigint;
+    
+    if (viewerId === BigInt(0)) {
+      return null;
+    }
+
+    return this.getViewer(Number(viewerId), chainId);
+  }
+
+  /**
+   * Get viewer by thirdweb ID
+   * @param thirdwebId Thirdweb account ID
+   * @param chainId Chain ID
+   * @returns Viewer information or null if not found
+   */
+  async getViewerByThirdwebId(thirdwebId: string, chainId: number): Promise<ViewerInfo | null> {
+    const contractAddress = this.getContractAddress(chainId);
+    
+    if (!contractAddress) {
+      throw new Error(`Chain ${chainId} not supported`);
+    }
+
+    const chain = this.getChainById(chainId);
+    const contract = getContract({
+      client: this.client,
+      chain,
+      address: contractAddress,
+    });
+
+    const viewerId = await this.readContract(contract, "getViewerByThirdwebId", [thirdwebId]) as bigint;
+    
+    if (viewerId === BigInt(0)) {
+      return null;
+    }
+
+    const viewer = await this.getViewer(Number(viewerId), chainId);
+    if (viewer) {
+      viewer.thirdwebId = thirdwebId;
+    }
+    return viewer;
+  }
+
+  /**
+   * Update viewer wallet address
+   * @param viewerId Viewer's unique ID
+   * @param newWallet New wallet address
+   * @param chainId Chain ID
+   * @returns Success status
+   */
+  async updateViewerWallet(viewerId: number, newWallet: string, chainId: number): Promise<boolean> {
+    const contractAddress = this.getContractAddress(chainId);
+    
+    if (!contractAddress) {
+      throw new Error(`Chain ${chainId} not supported`);
+    }
+
+    const chain = this.getChainById(chainId);
+    const contract = getContract({
+      client: this.client,
+      chain,
+      address: contractAddress,
+    });
+
+    const transaction = prepareContractCall({
+      contract,
+      method: "function updateViewerWallet(uint256 viewerId, address newWallet)",
+      params: [BigInt(viewerId), newWallet],
+    });
+
+    const result = await this.executeTransaction(transaction);
+    return (result as any).success;
+  }
+
+  /**
+   * Get viewer's USDC balance on ApeChain
+   * @param viewerAddress Address of the viewer
+   * @returns USDC balance on ApeChain
+   */
+  async getViewerUsdcBalanceOnApeChain(viewerAddress: string): Promise<string> {
+    const apeChainAddress = this.getContractAddress(SUPPORTED_CHAINS.APECHAIN);
+    if (!apeChainAddress) {
+      throw new Error('ApeChain contract not deployed or configured');
+    }
+
+    const contract = getContract({
+      client: this.client,
+      chain: this.getChainById(SUPPORTED_CHAINS.APECHAIN),
+      address: apeChainAddress,
+    });
+
+    // On ApeChain, check USDC balance for viewer
+    const balances = await this.readContract(contract, "getBalances", [viewerAddress]) as [bigint, bigint];
+    return balances[1].toString(); // usdcBalance is the second return value
+  }
+
+  /**
+   * Helper method to approve token spending if needed
+   * @private
+   */
+  /**
+   * Create a reward pool and distribute equally among viewers
+   * @param params Pool parameters
+   * @returns Pool distribution result
+   */
+  async createRewardPool(params: RewardPoolParams): Promise<RewardPoolResult> {
+    const chainId = params.chainId || SUPPORTED_CHAINS.POLYGON;
+    const { totalAmount, viewerAddresses, reason = "Reward pool distribution" } = params;
+
+    // Validate inputs
+    if (!viewerAddresses || viewerAddresses.length === 0) {
+      return {
+        success: false,
+        error: "No viewer addresses provided",
+        totalDistributed: "0",
+        platformFee: "0",
+        perViewerAmount: "0",
+        viewerCount: 0,
+        transactions: []
+      };
+    }
+
+    // Remove duplicates and validate addresses
+    const uniqueViewers = [...new Set(viewerAddresses)].filter(addr => 
+      addr && addr.startsWith('0x') && addr.length === 42
+    );
+
+    if (uniqueViewers.length === 0) {
+      return {
+        success: false,
+        error: "No valid viewer addresses found",
+        totalDistributed: "0",
+        platformFee: "0",
+        perViewerAmount: "0", 
+        viewerCount: 0,
+        transactions: []
+      };
+    }
+
+    try {
+      // Calculate distribution
+      const calculation = this.calculateRewardPoolDistribution(totalAmount, uniqueViewers.length);
+      
+      // Create viewer reward params
+      const viewers = uniqueViewers.map(address => ({
+        address,
+        amount: calculation.perViewerAmount,
+        reason
+      }));
+
+      // Split into batches of 50 (contract limit)
+      const batches: Array<typeof viewers> = [];
+      for (let i = 0; i < viewers.length; i += 50) {
+        batches.push(viewers.slice(i, i + 50));
+      }
+
+      // Execute all batches
+      const transactions: string[] = [];
+      let allSuccess = true;
+
+      for (let i = 0; i < batches.length; i++) {
+        const batch = batches[i];
+        const result = await this.batchRewardViewers({
+          viewers: batch,
+          chainId
+        });
+
+        if (result.success && result.transactionHash) {
+          transactions.push(result.transactionHash);
+        } else {
+          allSuccess = false;
+          console.error(`Batch ${i + 1} failed:`, result.error);
+        }
+      }
+
+      // Estimate USDC per viewer (rough estimate - actual may vary based on exchange rates)
+      const estimatedUsdcPerViewer = await this.estimateUsdcAmount(
+        calculation.perViewerAmount,
+        chainId
+      );
+
+      return {
+        success: allSuccess,
+        totalDistributed: calculation.distributableAmount,
+        platformFee: calculation.platformFee,
+        perViewerAmount: calculation.perViewerAmount,
+        viewerCount: uniqueViewers.length,
+        transactions,
+        estimatedUsdcPerViewer,
+        error: allSuccess ? undefined : "Some batches failed to process"
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message || "Failed to create reward pool",
+        totalDistributed: "0",
+        platformFee: "0",
+        perViewerAmount: "0",
+        viewerCount: 0,
+        transactions: []
+      };
+    }
+  }
+
+  /**
+   * Calculate reward pool distribution
+   * @param totalAmount Total amount to distribute
+   * @param viewerCount Number of viewers
+   * @returns Distribution calculation
+   */
+  calculateRewardPoolDistribution(totalAmount: string, viewerCount: number): RewardPoolCalculation {
+    const total = BigInt(totalAmount);
+    const platformFee = total * 100n / 10000n; // 1% platform fee
+    const distributableAmount = total - platformFee;
+    const perViewerAmount = distributableAmount / BigInt(viewerCount);
+    const batchCount = Math.ceil(viewerCount / 50);
+
+    return {
+      totalAmount: total.toString(),
+      platformFee: platformFee.toString(),
+      distributableAmount: distributableAmount.toString(),
+      perViewerAmount: perViewerAmount.toString(),
+      viewerCount,
+      batchCount
+    };
+  }
+
+  /**
+   * Estimate USDC amount for a given native token amount
+   * This is a rough estimate - actual conversion depends on current rates
+   */
+  private async estimateUsdcAmount(nativeAmount: string, chainId: number): Promise<string> {
+    // Rough estimates based on typical rates (in production, use price oracles)
+    const estimateRates: Record<number, number> = {
+      1: 2000,      // ETH ~$2000
+      137: 0.8,     // MATIC ~$0.80
+      10: 2000,     // ETH on Optimism
+      56: 300,      // BNB ~$300
+      2741: 2000,   // ETH on Abstract
+      43114: 30,    // AVAX ~$30
+      8453: 2000,   // ETH on Base
+      42161: 2000,  // ETH on Arbitrum
+      167000: 2000, // ETH on Taiko
+      // Testnets (same rates as mainnet for estimation)
+      17000: 2000,  // ETH on Holesky
+      80002: 0.8,   // MATIC on Amoy
+      33111: 1      // APE on Curtis testnet
+    };
+
+    const rate = estimateRates[chainId] || 1;
+    const amount = parseFloat(nativeAmount) / 1e18; // Convert from wei
+    const usdcAmount = (amount * rate * 1e6).toFixed(0); // Convert to USDC decimals (6)
+    
+    return usdcAmount;
+  }
+
+  private async approveTokenIfNeeded(
+    tokenAddress: string,
+    spenderAddress: string,
+    amount: string,
+    chainId: number
+  ): Promise<void> {
+    const chain = this.getChainById(chainId);
+    const tokenContract = getContract({
+      client: this.client,
+      chain,
+      address: tokenAddress,
+    });
+
+    // Check current allowance
+    const allowance = await this.readContract(
+      tokenContract,
+      "allowance",
+      [/* owner address would go here */, spenderAddress]
+    ) as bigint;
+
+    if (allowance < BigInt(amount)) {
+      // Approve the required amount
+      const approveTx = prepareContractCall({
+        contract: tokenContract,
+        method: "function approve(address spender, uint256 amount)",
+        params: [spenderAddress, BigInt(amount)]
+      });
+
+      await this.executeTransaction(approveTx);
+    }
+  }
+}
+
