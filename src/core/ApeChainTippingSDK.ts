@@ -1342,5 +1342,51 @@ export class ApeChainTippingSDK {
       await this.executeTransaction(approveTx);
     }
   }
+
+  /**
+   * Get contract owner address
+   */
+  async getOwner(chainId: number): Promise<string> {
+    const contractAddress = this.getContractAddress(chainId);
+    if (!contractAddress) {
+      throw new Error(`No contract address for chain ${chainId}`);
+    }
+
+    const chain = this.getChainById(chainId);
+    const contract = getContract({
+      client: this.client,
+      chain,
+      address: contractAddress,
+    });
+
+    return await this.readContract(contract, "owner", []) as string;
+  }
+
+  /**
+   * Get business owner address
+   */
+  async getBusinessOwner(chainId: number): Promise<string> {
+    const contractAddress = this.getContractAddress(chainId);
+    if (!contractAddress) {
+      throw new Error(`No contract address for chain ${chainId}`);
+    }
+
+    const chain = this.getChainById(chainId);
+    const contract = getContract({
+      client: this.client,
+      chain,
+      address: contractAddress,
+    });
+
+    return await this.readContract(contract, "businessOwner", []) as string;
+  }
+
+  /**
+   * Check if address is the contract owner
+   */
+  async isOwner(chainId: number, address: string): Promise<boolean> {
+    const owner = await this.getOwner(chainId);
+    return owner.toLowerCase() === address.toLowerCase();
+  }
 }
 

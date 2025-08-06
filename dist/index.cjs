@@ -1122,6 +1122,45 @@ var ApeChainTippingSDK = class {
       await this.executeTransaction(approveTx);
     }
   }
+  /**
+   * Get contract owner address
+   */
+  async getOwner(chainId) {
+    const contractAddress = this.getContractAddress(chainId);
+    if (!contractAddress) {
+      throw new Error(`No contract address for chain ${chainId}`);
+    }
+    const chain = this.getChainById(chainId);
+    const contract = thirdweb.getContract({
+      client: this.client,
+      chain,
+      address: contractAddress
+    });
+    return await this.readContract(contract, "owner", []);
+  }
+  /**
+   * Get business owner address
+   */
+  async getBusinessOwner(chainId) {
+    const contractAddress = this.getContractAddress(chainId);
+    if (!contractAddress) {
+      throw new Error(`No contract address for chain ${chainId}`);
+    }
+    const chain = this.getChainById(chainId);
+    const contract = thirdweb.getContract({
+      client: this.client,
+      chain,
+      address: contractAddress
+    });
+    return await this.readContract(contract, "businessOwner", []);
+  }
+  /**
+   * Check if address is the contract owner
+   */
+  async isOwner(chainId, address) {
+    const owner = await this.getOwner(chainId);
+    return owner.toLowerCase() === address.toLowerCase();
+  }
 };
 var DEFAULT_CONFIG = {
   environment: "production",

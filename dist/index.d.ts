@@ -294,6 +294,18 @@ declare class ApeChainTippingSDK {
      */
     private estimateUsdcAmount;
     private approveTokenIfNeeded;
+    /**
+     * Get contract owner address
+     */
+    getOwner(chainId: number): Promise<string>;
+    /**
+     * Get business owner address
+     */
+    getBusinessOwner(chainId: number): Promise<string>;
+    /**
+     * Check if address is the contract owner
+     */
+    isOwner(chainId: number, address: string): Promise<boolean>;
 }
 
 interface RelayQuote {
