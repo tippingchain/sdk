@@ -1,6 +1,6 @@
 {
   "name": "@tippingchain/sdk",
-  "version": "2.0.3",
+  "version": "2.0.4",
   "type": "module",
   "description": "TippingChain SDK v2.0 - Multi-chain tipping with USDC payouts on ApeChain",
   "main": "./dist/index.js",
@@ -27,7 +27,7 @@
     "test:coverage": "jest --coverage",
     "lint": "eslint src/**/*.ts",
     "lint:fix": "eslint src/**/*.ts --fix",
-    "prepublishOnly": "npm run clean && npm run build",
+    "prepublishOnly": "rm -rf dist && ./node_modules/.bin/tsup",
     "clean": "rm -rf dist"
   },
   "files": [
