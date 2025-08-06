@@ -1,0 +1,355 @@
+import { MembershipTier } from '@tippingchain/contracts-interface';
+export { CONTRACT_CONSTANTS, MembershipTier, NETWORK_CONFIGS, RELAY_RECEIVER_ADDRESSES, SUPPORTED_CHAINS, SUPPORTED_TESTNETS, TIER_CREATOR_SHARES, getAllContractAddresses, getContractAddress, getRelayReceiverAddress, isContractDeployed } from '@tippingchain/contracts-interface';
+
+/**
+ * Types for viewer rewards functionality
+ */
+/**
+ * Represents a viewer reward transaction
+ */
+interface ViewerReward {
+    creator: string;
+    viewer: string;
+    token: string;
+    amount: string;
+    platformFee: string;
+    reason: string;
+    timestamp: number;
+    transactionHash: string;
+}
+/**
+ * Parameters for rewarding a single viewer
+ */
+interface ViewerRewardParams {
+    viewerId?: number;
+    viewerAddress?: string;
+    thirdwebId?: string;
+    amount: string;
+    reason?: string;
+    token?: string;
+    chainId?: number;
+}
+/**
+ * Parameters for batch rewarding multiple viewers
+ */
+interface BatchViewerRewardParams {
+    viewers: Array<{
+        viewerId?: number;
+        address?: string;
+        thirdwebId?: string;
+        amount: string;
+        reason?: string;
+    }>;
+    token?: string;
+    chainId?: number;
+}
+/**
+ * Viewer reward statistics for an address
+ */
+interface ViewerRewardStats {
+    totalRewardsGiven: string;
+    totalRewardsReceived: string;
+    rewardCount: number;
+}
+/**
+ * Platform-wide viewer rewards statistics
+ */
+interface ViewerRewardsPlatformStats {
+    totalRewards: string;
+    rewardsEnabled: boolean;
+    platformFeeRate: number;
+}
+/**
+ * Result of a viewer reward transaction
+ */
+interface ViewerRewardResult {
+    success: boolean;
+    transactionHash?: string;
+    chainId?: number;
+    error?: string;
+    viewerAmount?: string;
+    platformFee?: string;
+    estimatedUsdcAmount?: string;
+    destinationChain?: number;
+}
+/**
+ * Viewer information
+ */
+interface ViewerInfo {
+    id: number;
+    wallet: string;
+    totalReceived: string;
+    thirdwebId?: string;
+}
+/**
+ * Parameters for registering a viewer
+ */
+interface ViewerRegistration {
+    walletAddress: string;
+    thirdwebId?: string;
+    chainId?: number;
+}
+/**
+ * Parameters for creating a reward pool
+ */
+interface RewardPoolParams {
+    totalAmount: string;
+    viewerAddresses: string[];
+    reason?: string;
+    chainId?: number;
+}
+/**
+ * Result of creating a reward pool
+ */
+interface RewardPoolResult {
+    success: boolean;
+    totalDistributed: string;
+    platformFee: string;
+    perViewerAmount: string;
+    viewerCount: number;
+    transactions: string[];
+    estimatedUsdcPerViewer?: string;
+    error?: string;
+}
+/**
+ * Distribution calculation for preview
+ */
+interface RewardPoolCalculation {
+    totalAmount: string;
+    platformFee: string;
+    distributableAmount: string;
+    perViewerAmount: string;
+    viewerCount: number;
+    batchCount: number;
+    estimatedGasCost?: string;
+}
+
+interface ApeChainTippingConfig {
+    clientId: string;
+    environment: 'development' | 'production';
+    streamingPlatformAddresses?: Record<number, string>;
+    useTestnet?: boolean;
+}
+
+interface Creator {
+    id: number;
+    wallet: string;
+    active: boolean;
+    totalTips: string;
+    tipCount: number;
+    tier?: MembershipTier;
+    creatorShareBps?: number;
+}
+interface TipParams {
+    sourceChainId: number;
+    creatorId: number;
+    token: string;
+    amount: string;
+}
+interface TipResult {
+    success: boolean;
+    sourceTransactionHash?: string;
+    relayId?: string;
+    estimatedUsdcAmount?: string;
+    creatorId?: number;
+    error?: string;
+}
+interface CreatorRegistration {
+    creatorWallet: string;
+    tier: MembershipTier;
+    thirdwebId?: string;
+    chainId?: number;
+}
+interface TipSplits {
+    platformFee: string;
+    creatorAmount: string;
+    businessAmount: string;
+}
+interface PlatformStats {
+    totalTips: string;
+    totalCount: number;
+    totalRelayed: string;
+    activeCreators: number;
+    autoRelayEnabled: boolean;
+}
+declare class ApeChainTippingSDK {
+    private client;
+    private config;
+    private relayService;
+    constructor(config: ApeChainTippingConfig);
+    private getContractAddress;
+    sendTip(params: TipParams): Promise<TipResult>;
+    addCreator(registration: CreatorRegistration): Promise<number>;
+    private addCreatorToChain;
+    getCreator(creatorId: number, chainId: number): Promise<Creator>;
+    getCreatorByWallet(walletAddress: string, chainId: number): Promise<Creator | null>;
+    /**
+     * Get creator by thirdweb account ID
+     * @param thirdwebId Thirdweb account ID
+     * @param chainId Chain ID
+     * @returns Creator information or null if not found
+     */
+    getCreatorByThirdwebId(thirdwebId: string, chainId: number): Promise<Creator | null>;
+    updateCreatorWallet(creatorId: number, newWallet: string, chainId: number): Promise<boolean>;
+    updateCreatorTier(creatorId: number, newTier: MembershipTier, chainId: number): Promise<boolean>;
+    calculateTipSplits(creatorId: number, tipAmount: string, chainId: number): Promise<TipSplits>;
+    getCreatorUsdcBalanceOnApeChain(creatorAddress: string): Promise<string>;
+    getPlatformStats(chainId: number): Promise<PlatformStats>;
+    getTopCreators(limit: number | undefined, chainId: number): Promise<Creator[]>;
+    private getChainById;
+    private executeTransaction;
+    private readContract;
+    /**
+     * Register a new viewer with optional thirdweb ID
+     * @param registration Viewer registration parameters
+     * @returns The assigned viewer ID
+     */
+    registerViewer(registration: ViewerRegistration): Promise<number>;
+    /**
+     * Send a reward to a viewer
+     * @param params Viewer reward parameters
+     * @returns Transaction result
+     */
+    rewardViewer(params: ViewerRewardParams): Promise<ViewerRewardResult>;
+    /**
+     * Batch reward multiple viewers (gas efficient)
+     * @param params Batch viewer reward parameters
+     * @returns Transaction result
+     */
+    batchRewardViewers(params: BatchViewerRewardParams): Promise<ViewerRewardResult>;
+    /**
+     * Get viewer reward statistics for an address
+     * @param address Address to check (can be creator or viewer)
+     * @param chainId Chain ID
+     * @returns Viewer reward statistics
+     */
+    getViewerRewardStats(address: string, chainId: number): Promise<ViewerRewardStats>;
+    /**
+     * Check if viewer rewards are enabled on a chain
+     * @param chainId Chain ID
+     * @returns Whether viewer rewards are enabled
+     */
+    areViewerRewardsEnabled(chainId: number): Promise<boolean>;
+    /**
+     * Get platform-wide viewer rewards statistics
+     * @param chainId Chain ID
+     * @returns Platform viewer rewards statistics
+     */
+    getViewerRewardsPlatformStats(chainId: number): Promise<ViewerRewardsPlatformStats>;
+    /**
+     * Get viewer information by ID
+     * @param viewerId Viewer's unique ID
+     * @param chainId Chain ID
+     * @returns Viewer information
+     */
+    getViewer(viewerId: number, chainId: number): Promise<ViewerInfo | null>;
+    /**
+     * Get viewer by wallet address
+     * @param walletAddress Wallet address
+     * @param chainId Chain ID
+     * @returns Viewer information or null if not found
+     */
+    getViewerByWallet(walletAddress: string, chainId: number): Promise<ViewerInfo | null>;
+    /**
+     * Get viewer by thirdweb ID
+     * @param thirdwebId Thirdweb account ID
+     * @param chainId Chain ID
+     * @returns Viewer information or null if not found
+     */
+    getViewerByThirdwebId(thirdwebId: string, chainId: number): Promise<ViewerInfo | null>;
+    /**
+     * Update viewer wallet address
+     * @param viewerId Viewer's unique ID
+     * @param newWallet New wallet address
+     * @param chainId Chain ID
+     * @returns Success status
+     */
+    updateViewerWallet(viewerId: number, newWallet: string, chainId: number): Promise<boolean>;
+    /**
+     * Get viewer's USDC balance on ApeChain
+     * @param viewerAddress Address of the viewer
+     * @returns USDC balance on ApeChain
+     */
+    getViewerUsdcBalanceOnApeChain(viewerAddress: string): Promise<string>;
+    /**
+     * Helper method to approve token spending if needed
+     * @private
+     */
+    /**
+     * Create a reward pool and distribute equally among viewers
+     * @param params Pool parameters
+     * @returns Pool distribution result
+     */
+    createRewardPool(params: RewardPoolParams): Promise<RewardPoolResult>;
+    /**
+     * Calculate reward pool distribution
+     * @param totalAmount Total amount to distribute
+     * @param viewerCount Number of viewers
+     * @returns Distribution calculation
+     */
+    calculateRewardPoolDistribution(totalAmount: string, viewerCount: number): RewardPoolCalculation;
+    /**
+     * Estimate USDC amount for a given native token amount
+     * This is a rough estimate - actual conversion depends on current rates
+     */
+    private estimateUsdcAmount;
+    private approveTokenIfNeeded;
+}
+
+interface RelayQuote {
+    id: string;
+    fromChainId: number;
+    toChainId: number;
+    fromToken: string;
+    toToken: string | null;
+    amount: string;
+    estimatedOutput: string;
+    fees: string;
+    estimatedTime: number;
+    route?: unknown;
+}
+interface RelayResult {
+    success: boolean;
+    relayId?: string;
+    destinationChain: number;
+    estimatedUsdcAmount?: string;
+    error?: string;
+}
+interface QuoteRequestParams {
+    fromChainId: number;
+    fromToken: string;
+    toChainId: number;
+    toToken: string;
+    amount: string;
+}
+declare class ApeChainRelayService {
+    private readonly APECHAIN_ID;
+    private readonly USDC_TOKEN_ADDRESS;
+    private readonly baseUrl;
+    /**
+     * Get a quote for relaying tokens to ApeChain (for estimation purposes)
+     * Note: The actual relay is now handled by the integrated contract
+     */
+    getQuote(params: QuoteRequestParams): Promise<RelayQuote>;
+    /**
+     * Estimate USDC output for a tip (deprecated - contracts handle relay automatically)
+     * @deprecated Use getQuote directly instead
+     */
+    relayTipToApeChain(params: {
+        fromChainId: number;
+        fromToken: string;
+        amount: string;
+        creatorAddress: string;
+        targetToken?: string;
+    }): Promise<RelayResult>;
+    private makeRequest;
+}
+
+declare const DEFAULT_CONFIG: {
+    readonly environment: "production";
+    readonly endpoints: {
+        readonly relayApi: "https://api.relay.link";
+    };
+};
+
+export { ApeChainRelayService, type ApeChainTippingConfig, ApeChainTippingSDK, type BatchViewerRewardParams, type Creator, type CreatorRegistration, DEFAULT_CONFIG, type PlatformStats, type RelayQuote, type RelayResult, type RewardPoolCalculation, type RewardPoolParams, type RewardPoolResult, type TipParams, type TipResult, type ViewerInfo, type ViewerRegistration, type ViewerReward, type ViewerRewardParams, type ViewerRewardResult, type ViewerRewardStats, type ViewerRewardsPlatformStats };

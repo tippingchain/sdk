@@ -16,7 +16,6 @@
     "allowSyntheticDefaultImports": true,
     "jsx": "react-jsx",
     "noEmit": false,
-    "incremental": true,
     "sourceMap": true
   },
   "include": ["src/**/*"],
