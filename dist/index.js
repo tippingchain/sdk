@@ -229,6 +229,38 @@ var ApeChainTippingSDK = class {
     const creatorId = await this.readContract(contract, "getCreatorByWallet", [creatorWallet]);
     return Number(creatorId);
   }
+  /**
+   * Prepare a creator addition transaction for external execution
+   * This method returns the prepared transaction without executing it,
+   * allowing the calling application to handle wallet interaction
+   */
+  async prepareAddCreatorTransaction(registration) {
+    const chainId = registration.chainId || SUPPORTED_CHAINS.BASE;
+    const contractAddress = this.getContractAddress(chainId);
+    if (!contractAddress) {
+      throw new Error(`Chain ${chainId} not supported for creator registration or contract not deployed`);
+    }
+    const chain = this.getChainById(chainId);
+    const contract = getContract({
+      client: this.client,
+      chain,
+      address: contractAddress
+    });
+    const transaction = prepareContractCall({
+      contract,
+      method: "function addCreator(address creatorWallet, uint8 tier, string thirdwebId)",
+      params: [
+        registration.creatorWallet,
+        registration.tier,
+        registration.thirdwebId || ""
+      ]
+    });
+    return {
+      transaction,
+      contractAddress,
+      chainId
+    };
+  }
   async getCreator(creatorId, chainId) {
     const contractAddress = this.getContractAddress(chainId);
     if (!contractAddress) {

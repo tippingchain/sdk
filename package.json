@@ -1,8 +1,8 @@
 {
   "name": "@tippingchain/sdk",
-  "version": "2.0.9",
+  "version": "2.1.0",
   "type": "module",
-  "description": "TippingChain SDK v2.0 - Multi-chain tipping with USDC payouts on ApeChain",
+  "description": "TippingChain SDK v2.1 - Multi-chain tipping with USDC payouts on ApeChain + Creator Management Transaction Preparation",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "author": "TippingChain Team",

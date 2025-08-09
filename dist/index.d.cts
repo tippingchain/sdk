@@ -181,6 +181,16 @@ declare class ApeChainTippingSDK {
     sendTip(params: TipParams): Promise<TipResult>;
     addCreator(registration: CreatorRegistration): Promise<number>;
     private addCreatorToChain;
+    /**
+     * Prepare a creator addition transaction for external execution
+     * This method returns the prepared transaction without executing it,
+     * allowing the calling application to handle wallet interaction
+     */
+    prepareAddCreatorTransaction(registration: CreatorRegistration): Promise<{
+        transaction: any;
+        contractAddress: string;
+        chainId: number;
+    }>;
     getCreator(creatorId: number, chainId: number): Promise<Creator>;
     getCreatorByWallet(walletAddress: string, chainId: number): Promise<Creator | null>;
     /**
