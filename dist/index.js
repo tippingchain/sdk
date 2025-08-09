@@ -1,8 +1,7 @@
-import { getRpcClient, getContract, readContract, createThirdwebClient, prepareContractCall } from 'thirdweb';
+import { getContract, readContract, createThirdwebClient, prepareContractCall } from 'thirdweb';
 import { defineChain, arbitrum, base, avalanche, bsc, optimism, polygon, ethereum } from 'thirdweb/chains';
 import { SUPPORTED_CHAINS, CONTRACT_CONSTANTS, getContractAddress } from '@tippingchain/contracts-interface';
 export { CONTRACT_CONSTANTS, MembershipTier, NETWORK_CONFIGS, RELAY_RECEIVER_ADDRESSES, SUPPORTED_CHAINS, SUPPORTED_TESTNETS, TIER_CREATOR_SHARES, getAllContractAddresses, getContractAddress, getRelayReceiverAddress, isContractDeployed } from '@tippingchain/contracts-interface';
-import { getNativeBalance } from 'thirdweb/extensions/erc20';
 
 // src/core/ApeChainTippingSDK.ts
 var ApeChainRelayService = class {
@@ -90,6 +89,8 @@ var ApeChainRelayService = class {
     }
   }
 };
+
+// src/services/TransactionStatusService.ts
 var DEFAULT_OPTIONS = {
   maxRetries: 100,
   // 100 * 3s = 5 minutes max
@@ -134,7 +135,6 @@ var TransactionStatusService = class {
    */
   async watchTransactionWithCallback(transactionHash, chain, onUpdate, options = {}) {
     const opts = { ...DEFAULT_OPTIONS, ...options };
-    getRpcClient({ client: this.client, chain });
     let retries = 0;
     const startTime = Date.now();
     const poll = async () => {
@@ -200,42 +200,28 @@ var TransactionStatusService = class {
     return poll();
   }
   /**
-   * Get transaction receipt
+   * Get transaction receipt (simplified implementation)
    */
   async getTransactionReceipt(transactionHash, chain) {
     try {
-      const rpcClient = getRpcClient({ client: this.client, chain });
-      const receipt = await rpcClient({
-        method: "eth_getTransactionReceipt",
-        params: [transactionHash]
+      const response = await fetch(`https://${chain.id}.rpc.thirdweb.com`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          method: "eth_getTransactionReceipt",
+          params: [transactionHash],
+          id: 1
+        })
       });
+      const data = await response.json();
+      const receipt = data.result;
       if (!receipt) {
         return null;
       }
-      let timestamp;
-      try {
-        const block = await rpcClient({
-          method: "eth_getBlockByHash",
-          params: [receipt.blockHash, false]
-        });
-        if (block && block.timestamp) {
-          timestamp = parseInt(block.timestamp, 16) * 1e3;
-        }
-      } catch (blockError) {
-        console.warn("Failed to fetch block timestamp:", blockError);
-      }
-      let confirmations = 0;
-      try {
-        const currentBlockNumber = await rpcClient({
-          method: "eth_blockNumber",
-          params: []
-        });
-        const currentBlock = parseInt(currentBlockNumber, 16);
-        const txBlock = parseInt(receipt.blockNumber, 16);
-        confirmations = Math.max(0, currentBlock - txBlock + 1);
-      } catch (confirmError) {
-        console.warn("Failed to calculate confirmations:", confirmError);
-      }
+      let confirmations = 1;
       return {
         transactionHash: receipt.transactionHash,
         blockNumber: parseInt(receipt.blockNumber, 16),
@@ -244,7 +230,8 @@ var TransactionStatusService = class {
         effectiveGasPrice: receipt.effectiveGasPrice ? parseInt(receipt.effectiveGasPrice, 16).toString() : "0",
         status: receipt.status === "0x1" ? "success" : "failure",
         confirmations,
-        timestamp
+        timestamp: Date.now()
+        // Use current timestamp as approximation
       };
     } catch (error) {
       console.error("Error fetching transaction receipt:", error);
@@ -260,13 +247,25 @@ var TransactionStatusService = class {
       if (receipt) {
         return receipt.status === "success" ? "confirmed" : "failed";
       }
-      const rpcClient = getRpcClient({ client: this.client, chain });
-      const transaction = await rpcClient({
-        method: "eth_getTransactionByHash",
-        params: [transactionHash]
-      });
-      if (transaction) {
-        return "pending";
+      try {
+        const response = await fetch(`https://${chain.id}.rpc.thirdweb.com`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            method: "eth_getTransactionByHash",
+            params: [transactionHash],
+            id: 1
+          })
+        });
+        const data = await response.json();
+        if (data.result) {
+          return "pending";
+        }
+      } catch (error) {
+        console.warn("Error checking mempool:", error);
       }
       return "not_found";
     } catch (error) {
@@ -304,7 +303,6 @@ var TransactionStatusService = class {
    * Internal implementation for watching transactions
    */
   async _watchTransactionInternal(transactionHash, chain, options, signal) {
-    getRpcClient({ client: this.client, chain });
     let retries = 0;
     const startTime = Date.now();
     const poll = async () => {
@@ -450,12 +448,24 @@ var BalanceWatcherService = class {
         });
         balance = balanceResult.toString();
       } else {
-        const balanceResult = await getNativeBalance({
-          client: this.client,
-          chain,
-          address
+        const response = await fetch(`https://${chain.id}.rpc.thirdweb.com`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            method: "eth_getBalance",
+            params: [address, "latest"],
+            id: 1
+          })
         });
-        balance = balanceResult.value.toString();
+        const data = await response.json();
+        if (data.result) {
+          balance = parseInt(data.result, 16).toString();
+        } else {
+          balance = "0";
+        }
       }
       this.balanceCache.set(cacheKey, {
         balance,
@@ -2088,8 +2098,8 @@ var ApeChainTippingSDK = class {
   async getNativeBalance(walletAddress, chainId) {
     const chain = this.getChainById(chainId);
     try {
-      const { getRpcClient: getRpcClient2 } = await import('thirdweb/rpc');
-      const rpcRequest = getRpcClient2({ client: this.client, chain });
+      const { getRpcClient } = await import('thirdweb/rpc');
+      const rpcRequest = getRpcClient({ client: this.client, chain });
       const balance = await rpcRequest({
         method: "eth_getBalance",
         params: [walletAddress, "latest"]

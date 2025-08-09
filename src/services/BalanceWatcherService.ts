@@ -1,5 +1,5 @@
 // packages/sdk/src/services/BalanceWatcherService.ts
-import { ThirdwebClient, getContract, readContract, getRpcClient } from 'thirdweb';
+import { ThirdwebClient, getContract, readContract } from 'thirdweb';
 import { Chain } from 'thirdweb/chains';
 import { balanceOf } from 'thirdweb/extensions/erc20';
 
@@ -148,15 +148,26 @@ export class BalanceWatcherService {
 
         balance = balanceResult.toString();
       } else {
-        // Native token balance - use eth_getBalance RPC call
-        const rpcClient = getRpcClient({ client: this.client, chain });
-        
-        const balanceResult = await rpcClient({
-          method: 'eth_getBalance',
-          params: [address, 'latest']
+        // Native token balance - use direct RPC call
+        const response = await fetch(`https://${chain.id}.rpc.thirdweb.com`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            method: 'eth_getBalance',
+            params: [address, 'latest'],
+            id: 1
+          })
         });
 
-        balance = parseInt(balanceResult, 16).toString();
+        const data = await response.json();
+        if (data.result) {
+          balance = parseInt(data.result, 16).toString();
+        } else {
+          balance = '0';
+        }
       }
 
       // Update cache
