@@ -359,6 +359,31 @@ declare class ApeChainTippingSDK {
         symbol: string;
         decimals: number;
     }>;
+    /**
+     * Approve token spending for a spender contract
+     * @param tokenAddress Token contract address
+     * @param spenderAddress Spender contract address (e.g., TippingChain contract)
+     * @param amount Amount to approve (in token units, not wei)
+     * @param chainId Chain ID
+     * @returns Approval transaction result
+     */
+    approveToken(tokenAddress: string, spenderAddress: string, amount: string, chainId: number): Promise<{
+        success: boolean;
+        transactionHash?: string;
+        error?: string;
+    }>;
+    /**
+     * Approve unlimited token spending for a spender contract (max approval)
+     * @param tokenAddress Token contract address
+     * @param spenderAddress Spender contract address
+     * @param chainId Chain ID
+     * @returns Approval transaction result
+     */
+    approveTokenMax(tokenAddress: string, spenderAddress: string, chainId: number): Promise<{
+        success: boolean;
+        transactionHash?: string;
+        error?: string;
+    }>;
 }
 
 interface RelayQuote {

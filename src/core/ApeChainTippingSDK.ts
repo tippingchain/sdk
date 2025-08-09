@@ -1387,10 +1387,25 @@ export class ApeChainTippingSDK {
    * @returns Balance in wei as string
    */
   async getNativeBalance(walletAddress: string, chainId: number): Promise<string> {
-    // For now, return placeholder until we implement proper native balance checking
-    // This will be updated when we get the proper thirdweb balance API working
-    console.log(`Getting native balance for ${walletAddress} on chain ${chainId}`);
-    return '0'; // Placeholder - real implementation coming next
+    const chain = this.getChainById(chainId);
+    
+    try {
+      // Use thirdweb's built-in balance checking
+      const { getRpcClient } = await import('thirdweb/rpc');
+      const rpcRequest = getRpcClient({ client: this.client, chain });
+      
+      // Make eth_getBalance RPC call
+      const balance = await rpcRequest({
+        method: 'eth_getBalance',
+        params: [walletAddress, 'latest']
+      });
+      
+      // Convert hex balance to decimal string
+      return BigInt(balance as string).toString();
+    } catch (error) {
+      console.error(`Failed to get native balance for ${walletAddress} on chain ${chainId}:`, error);
+      return '0';
+    }
   }
 
   /**
@@ -1586,6 +1601,85 @@ export class ApeChainTippingSDK {
         decimals: 18,
       };
     }
+  }
+
+  /**
+   * Approve token spending for a spender contract
+   * @param tokenAddress Token contract address
+   * @param spenderAddress Spender contract address (e.g., TippingChain contract)
+   * @param amount Amount to approve (in token units, not wei)
+   * @param chainId Chain ID
+   * @returns Approval transaction result
+   */
+  async approveToken(
+    tokenAddress: string,
+    spenderAddress: string,
+    amount: string,
+    chainId: number
+  ): Promise<{
+    success: boolean;
+    transactionHash?: string;
+    error?: string;
+  }> {
+    if (tokenAddress === 'native') {
+      return {
+        success: true,
+        // Native tokens don't need approval
+      };
+    }
+
+    const chain = this.getChainById(chainId);
+    
+    try {
+      const tokenContract = getContract({
+        client: this.client,
+        chain,
+        address: tokenAddress,
+      });
+
+      // Prepare approval transaction
+      const approveTx = prepareContractCall({
+        contract: tokenContract,
+        method: 'function approve(address spender, uint256 amount) returns (bool)',
+        params: [spenderAddress, BigInt(amount)],
+      });
+
+      // Execute the approval transaction
+      const result = await this.executeTransaction(approveTx);
+      
+      return {
+        success: true,
+        transactionHash: (result as any).transactionHash,
+      };
+    } catch (error) {
+      console.error(`Failed to approve token ${tokenAddress}:`, error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      };
+    }
+  }
+
+  /**
+   * Approve unlimited token spending for a spender contract (max approval)
+   * @param tokenAddress Token contract address
+   * @param spenderAddress Spender contract address
+   * @param chainId Chain ID
+   * @returns Approval transaction result
+   */
+  async approveTokenMax(
+    tokenAddress: string,
+    spenderAddress: string,
+    chainId: number
+  ): Promise<{
+    success: boolean;
+    transactionHash?: string;
+    error?: string;
+  }> {
+    // Use max uint256 value for unlimited approval
+    const MAX_UINT256 = '115792089237316195423570985008687907853269984665640564039457584007913129639935';
+    
+    return this.approveToken(tokenAddress, spenderAddress, MAX_UINT256, chainId);
   }
 }
 
