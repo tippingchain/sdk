@@ -478,36 +478,45 @@ export class ApeChainTippingSDK {
       address: contractAddress,
     });
 
-    // Fetch all active creators in batches and sort client-side
-    const batchSize = 100;
-    let offset = 0;
+    // Fetch all active creators (limit to reasonable number for performance)
+    const maxCreators = Math.max(limit * 2, 100); // Get more than requested to enable proper sorting
+    const result = await this.readContract(
+      contract, 
+      "getAllActiveCreators", 
+      [BigInt(maxCreators)]
+    ) as [bigint[], string[]];
+    
+    const [creatorIds, wallets] = result;
     const allCreators: Creator[] = [];
     
-    while (true) {
-      const result = await this.readContract(
-        contract, 
-        "getAllActiveCreators", 
-        [BigInt(offset), BigInt(batchSize)]
-      ) as [bigint[], string[], bigint[], bigint];
-      
-      const [creatorIds, wallets, tipAmounts, totalActive] = result;
-      
-      // Add creators from this batch
-      for (let i = 0; i < creatorIds.length; i++) {
-        allCreators.push({
-          id: Number(creatorIds[i]),
-          wallet: wallets[i],
-          active: true, // getAllActiveCreators only returns active creators
-          totalTips: tipAmounts[i].toString(),
-          tipCount: 0 // Not returned by this method, would need getCreatorInfo for full details
-        });
-      }
-      
-      offset += batchSize;
-      
-      // Check if we've fetched all creators
-      if (offset >= Number(totalActive) || creatorIds.length < batchSize) {
-        break;
+    // Create creator objects - we'll fetch tip data for sorting below
+    for (let i = 0; i < creatorIds.length; i++) {
+      allCreators.push({
+        id: Number(creatorIds[i]),
+        wallet: wallets[i],
+        active: true, // getAllActiveCreators only returns active creators
+        totalTips: "0", // Will be fetched below
+        tipCount: 0 // Will be fetched below
+      });
+    }
+    
+    // Fetch tip data for proper sorting (for first few creators only to optimize performance)
+    const creatorsToEnrich = allCreators.slice(0, Math.min(limit * 3, allCreators.length));
+    
+    for (const creator of creatorsToEnrich) {
+      try {
+        // Try to get creator info for totalTips
+        const creatorInfo = await this.readContract(
+          contract,
+          "getCreatorInfo", 
+          [BigInt(creator.id)]
+        ) as [string, bigint, boolean, bigint, string];
+        
+        creator.totalTips = creatorInfo[1].toString(); // Total tips received
+        creator.tipCount = Number(creatorInfo[3]); // Tip count
+      } catch (error) {
+        // If getCreatorInfo is not available, keep defaults
+        console.warn(`Failed to get creator info for ID ${creator.id}:`, error);
       }
     }
     
@@ -523,26 +532,6 @@ export class ApeChainTippingSDK {
     
     // Take top N creators
     const topCreators = allCreators.slice(0, limit);
-    
-    // If needed, fetch full details for the top creators
-    if (topCreators.length > 0 && topCreators[0].tipCount === 0) {
-      // Optionally fetch full creator info including tipCount
-      const creatorIdList = topCreators.map(c => BigInt(c.id));
-      const detailsResult = await this.readContract(
-        contract,
-        "getCreatorsByIds",
-        [creatorIdList]
-      ) as [bigint[], string[], boolean[]];
-      
-      const [tipAmounts, wallets, activeStatus] = detailsResult;
-      
-      // Update with fresh data
-      for (let i = 0; i < topCreators.length; i++) {
-        topCreators[i].totalTips = tipAmounts[i].toString();
-        topCreators[i].wallet = wallets[i];
-        topCreators[i].active = activeStatus[i];
-      }
-    }
     
     return topCreators;
   }

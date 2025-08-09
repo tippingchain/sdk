@@ -402,30 +402,38 @@ var ApeChainTippingSDK = class {
       chain,
       address: contractAddress
     });
-    const batchSize = 100;
-    let offset = 0;
+    const maxCreators = Math.max(limit * 2, 100);
+    const result = await this.readContract(
+      contract,
+      "getAllActiveCreators",
+      [BigInt(maxCreators)]
+    );
+    const [creatorIds, wallets] = result;
     const allCreators = [];
-    while (true) {
-      const result = await this.readContract(
-        contract,
-        "getAllActiveCreators",
-        [BigInt(offset), BigInt(batchSize)]
-      );
-      const [creatorIds, wallets, tipAmounts, totalActive] = result;
-      for (let i = 0; i < creatorIds.length; i++) {
-        allCreators.push({
-          id: Number(creatorIds[i]),
-          wallet: wallets[i],
-          active: true,
-          // getAllActiveCreators only returns active creators
-          totalTips: tipAmounts[i].toString(),
-          tipCount: 0
-          // Not returned by this method, would need getCreatorInfo for full details
-        });
-      }
-      offset += batchSize;
-      if (offset >= Number(totalActive) || creatorIds.length < batchSize) {
-        break;
+    for (let i = 0; i < creatorIds.length; i++) {
+      allCreators.push({
+        id: Number(creatorIds[i]),
+        wallet: wallets[i],
+        active: true,
+        // getAllActiveCreators only returns active creators
+        totalTips: "0",
+        // Will be fetched below
+        tipCount: 0
+        // Will be fetched below
+      });
+    }
+    const creatorsToEnrich = allCreators.slice(0, Math.min(limit * 3, allCreators.length));
+    for (const creator of creatorsToEnrich) {
+      try {
+        const creatorInfo = await this.readContract(
+          contract,
+          "getCreatorInfo",
+          [BigInt(creator.id)]
+        );
+        creator.totalTips = creatorInfo[1].toString();
+        creator.tipCount = Number(creatorInfo[3]);
+      } catch (error) {
+        console.warn(`Failed to get creator info for ID ${creator.id}:`, error);
       }
     }
     allCreators.sort((a, b) => {
@@ -436,20 +444,6 @@ var ApeChainTippingSDK = class {
       return 0;
     });
     const topCreators = allCreators.slice(0, limit);
-    if (topCreators.length > 0 && topCreators[0].tipCount === 0) {
-      const creatorIdList = topCreators.map((c) => BigInt(c.id));
-      const detailsResult = await this.readContract(
-        contract,
-        "getCreatorsByIds",
-        [creatorIdList]
-      );
-      const [tipAmounts, wallets, activeStatus] = detailsResult;
-      for (let i = 0; i < topCreators.length; i++) {
-        topCreators[i].totalTips = tipAmounts[i].toString();
-        topCreators[i].wallet = wallets[i];
-        topCreators[i].active = activeStatus[i];
-      }
-    }
     return topCreators;
   }
   getChainById(chainId) {
