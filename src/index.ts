@@ -2,6 +2,29 @@
 export { ApeChainTippingSDK } from './core/ApeChainTippingSDK';
 export { ApeChainRelayService } from './services/ApeChainRelayService';
 
+// Real-time service exports
+export { 
+  TransactionStatusService,
+  type TransactionStatus,
+  type TransactionReceipt,
+  type TransactionStatusUpdate,
+  type WatchTransactionOptions
+} from './services/TransactionStatusService';
+
+export { 
+  BalanceWatcherService,
+  type BalanceUpdate,
+  type ChainBalanceMap,
+  type BalanceWatchOptions
+} from './services/BalanceWatcherService';
+
+export { 
+  RelayStatusService,
+  type RelayStatus,
+  type RelayUpdate,
+  type RelayWatchOptions
+} from './services/RelayStatusService';
+
 // Type exports
 export type {
   ApeChainTippingConfig,

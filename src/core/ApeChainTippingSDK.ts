@@ -12,6 +12,9 @@ import {
   defineChain 
 } from 'thirdweb/chains';
 import { ApeChainRelayService } from '../services/ApeChainRelayService';
+import { TransactionStatusService } from '../services/TransactionStatusService';
+import { BalanceWatcherService } from '../services/BalanceWatcherService';
+import { RelayStatusService } from '../services/RelayStatusService';
 import { 
   MembershipTier,
   STREAMING_PLATFORM_TIPPING_ABI,
@@ -95,6 +98,11 @@ export class ApeChainTippingSDK {
   private client: ThirdwebClient;
   private config: ApeChainTippingConfig;
   private relayService: ApeChainRelayService;
+  
+  // Real-time services
+  public readonly transactionStatus: TransactionStatusService;
+  public readonly balanceWatcher: BalanceWatcherService;
+  public readonly relayStatus: RelayStatusService;
 
   constructor(config: ApeChainTippingConfig) {
     if (!config.clientId) {
@@ -105,6 +113,11 @@ export class ApeChainTippingSDK {
     this.config = config;
     this.client = createThirdwebClient({ clientId: config.clientId });
     this.relayService = new ApeChainRelayService();
+    
+    // Initialize real-time services
+    this.transactionStatus = new TransactionStatusService(this.client);
+    this.balanceWatcher = new BalanceWatcherService(this.client);
+    this.relayStatus = new RelayStatusService(this.client);
   }
 
   private getContractAddress(chainId: number): string | undefined {

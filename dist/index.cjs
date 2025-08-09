@@ -3,6 +3,7 @@
 var thirdweb = require('thirdweb');
 var chains = require('thirdweb/chains');
 var contractsInterface = require('@tippingchain/contracts-interface');
+var erc20 = require('thirdweb/extensions/erc20');
 
 // src/core/ApeChainTippingSDK.ts
 var ApeChainRelayService = class {
@@ -90,6 +91,894 @@ var ApeChainRelayService = class {
     }
   }
 };
+var DEFAULT_OPTIONS = {
+  maxRetries: 100,
+  // 100 * 3s = 5 minutes max
+  retryInterval: 3e3,
+  // 3 seconds
+  timeout: 3e5,
+  // 5 minutes
+  confirmationsRequired: 1
+};
+var TransactionStatusService = class {
+  constructor(client) {
+    this.activeWatchers = /* @__PURE__ */ new Map();
+    this.client = client;
+  }
+  /**
+   * Watch a transaction until it's confirmed or fails
+   */
+  async watchTransaction(transactionHash, chain, options = {}) {
+    const opts = { ...DEFAULT_OPTIONS, ...options };
+    const watcherKey = `${chain.id}-${transactionHash}`;
+    if (this.activeWatchers.has(watcherKey)) {
+      return this.activeWatchers.get(watcherKey).promise;
+    }
+    const abortController = new AbortController();
+    const promise = this._watchTransactionInternal(
+      transactionHash,
+      chain,
+      opts,
+      abortController.signal
+    );
+    this.activeWatchers.set(watcherKey, {
+      abort: abortController,
+      promise
+    });
+    promise.finally(() => {
+      this.activeWatchers.delete(watcherKey);
+    });
+    return promise;
+  }
+  /**
+   * Watch a transaction with callback for real-time updates
+   */
+  async watchTransactionWithCallback(transactionHash, chain, onUpdate, options = {}) {
+    const opts = { ...DEFAULT_OPTIONS, ...options };
+    thirdweb.getRpcClient({ client: this.client, chain });
+    let retries = 0;
+    const startTime = Date.now();
+    const poll = async () => {
+      try {
+        if (Date.now() - startTime > opts.timeout) {
+          const update = {
+            transactionHash,
+            status: "failed",
+            error: "Transaction monitoring timeout",
+            timestamp: Date.now()
+          };
+          onUpdate(update);
+          return update;
+        }
+        const receipt = await this.getTransactionReceipt(transactionHash, chain);
+        if (receipt) {
+          const status = receipt.status === "success" ? "confirmed" : "failed";
+          const update = {
+            transactionHash,
+            status,
+            receipt,
+            timestamp: Date.now()
+          };
+          onUpdate(update);
+          return update;
+        }
+        if (retries < opts.maxRetries) {
+          const update = {
+            transactionHash,
+            status: "pending",
+            timestamp: Date.now()
+          };
+          onUpdate(update);
+          retries++;
+          await new Promise((resolve) => setTimeout(resolve, opts.retryInterval));
+          return poll();
+        } else {
+          const update = {
+            transactionHash,
+            status: "failed",
+            error: "Transaction not found after maximum retries",
+            timestamp: Date.now()
+          };
+          onUpdate(update);
+          return update;
+        }
+      } catch (error) {
+        retries++;
+        if (retries >= opts.maxRetries) {
+          const update = {
+            transactionHash,
+            status: "failed",
+            error: error instanceof Error ? error.message : "Unknown error",
+            timestamp: Date.now()
+          };
+          onUpdate(update);
+          return update;
+        }
+        await new Promise((resolve) => setTimeout(resolve, opts.retryInterval));
+        return poll();
+      }
+    };
+    return poll();
+  }
+  /**
+   * Get transaction receipt
+   */
+  async getTransactionReceipt(transactionHash, chain) {
+    try {
+      const rpcClient = thirdweb.getRpcClient({ client: this.client, chain });
+      const receipt = await rpcClient({
+        method: "eth_getTransactionReceipt",
+        params: [transactionHash]
+      });
+      if (!receipt) {
+        return null;
+      }
+      let timestamp;
+      try {
+        const block = await rpcClient({
+          method: "eth_getBlockByHash",
+          params: [receipt.blockHash, false]
+        });
+        if (block && block.timestamp) {
+          timestamp = parseInt(block.timestamp, 16) * 1e3;
+        }
+      } catch (blockError) {
+        console.warn("Failed to fetch block timestamp:", blockError);
+      }
+      let confirmations = 0;
+      try {
+        const currentBlockNumber = await rpcClient({
+          method: "eth_blockNumber",
+          params: []
+        });
+        const currentBlock = parseInt(currentBlockNumber, 16);
+        const txBlock = parseInt(receipt.blockNumber, 16);
+        confirmations = Math.max(0, currentBlock - txBlock + 1);
+      } catch (confirmError) {
+        console.warn("Failed to calculate confirmations:", confirmError);
+      }
+      return {
+        transactionHash: receipt.transactionHash,
+        blockNumber: parseInt(receipt.blockNumber, 16),
+        blockHash: receipt.blockHash,
+        gasUsed: parseInt(receipt.gasUsed, 16).toString(),
+        effectiveGasPrice: receipt.effectiveGasPrice ? parseInt(receipt.effectiveGasPrice, 16).toString() : "0",
+        status: receipt.status === "0x1" ? "success" : "failure",
+        confirmations,
+        timestamp
+      };
+    } catch (error) {
+      console.error("Error fetching transaction receipt:", error);
+      return null;
+    }
+  }
+  /**
+   * Check if a transaction exists in the mempool or blockchain
+   */
+  async getTransactionStatus(transactionHash, chain) {
+    try {
+      const receipt = await this.getTransactionReceipt(transactionHash, chain);
+      if (receipt) {
+        return receipt.status === "success" ? "confirmed" : "failed";
+      }
+      const rpcClient = thirdweb.getRpcClient({ client: this.client, chain });
+      const transaction = await rpcClient({
+        method: "eth_getTransactionByHash",
+        params: [transactionHash]
+      });
+      if (transaction) {
+        return "pending";
+      }
+      return "not_found";
+    } catch (error) {
+      console.error("Error checking transaction status:", error);
+      return "not_found";
+    }
+  }
+  /**
+   * Cancel watching a specific transaction
+   */
+  cancelWatch(transactionHash, chainId) {
+    const watcherKey = `${chainId}-${transactionHash}`;
+    const watcher = this.activeWatchers.get(watcherKey);
+    if (watcher) {
+      watcher.abort.abort();
+      this.activeWatchers.delete(watcherKey);
+    }
+  }
+  /**
+   * Cancel all active watchers
+   */
+  cancelAllWatches() {
+    for (const watcher of this.activeWatchers.values()) {
+      watcher.abort.abort();
+    }
+    this.activeWatchers.clear();
+  }
+  /**
+   * Get the number of active watchers
+   */
+  getActiveWatchersCount() {
+    return this.activeWatchers.size;
+  }
+  /**
+   * Internal implementation for watching transactions
+   */
+  async _watchTransactionInternal(transactionHash, chain, options, signal) {
+    thirdweb.getRpcClient({ client: this.client, chain });
+    let retries = 0;
+    const startTime = Date.now();
+    const poll = async () => {
+      if (signal.aborted) {
+        throw new Error("Transaction watching was cancelled");
+      }
+      try {
+        if (Date.now() - startTime > options.timeout) {
+          return {
+            transactionHash,
+            status: "failed",
+            error: "Transaction monitoring timeout",
+            timestamp: Date.now()
+          };
+        }
+        const receipt = await this.getTransactionReceipt(transactionHash, chain);
+        if (receipt) {
+          if (receipt.confirmations >= options.confirmationsRequired) {
+            return {
+              transactionHash,
+              status: receipt.status === "success" ? "confirmed" : "failed",
+              receipt,
+              timestamp: Date.now()
+            };
+          } else {
+            if (retries < options.maxRetries) {
+              retries++;
+              await new Promise((resolve) => setTimeout(resolve, options.retryInterval));
+              return poll();
+            }
+          }
+        }
+        if (retries < options.maxRetries) {
+          retries++;
+          await new Promise((resolve) => setTimeout(resolve, options.retryInterval));
+          return poll();
+        } else {
+          return {
+            transactionHash,
+            status: "failed",
+            error: "Transaction not found after maximum retries",
+            timestamp: Date.now()
+          };
+        }
+      } catch (error) {
+        if (signal.aborted) {
+          throw new Error("Transaction watching was cancelled");
+        }
+        retries++;
+        if (retries >= options.maxRetries) {
+          return {
+            transactionHash,
+            status: "failed",
+            error: error instanceof Error ? error.message : "Unknown error",
+            timestamp: Date.now()
+          };
+        }
+        await new Promise((resolve) => setTimeout(resolve, options.retryInterval));
+        return poll();
+      }
+    };
+    return poll();
+  }
+};
+var DEFAULT_BALANCE_OPTIONS = {
+  pollInterval: 1e4,
+  // 10 seconds
+  enableOptimisticUpdates: true,
+  refreshAfterTransaction: true,
+  maxRetries: 3
+};
+var BalanceWatcherService = class {
+  // 5 seconds
+  constructor(client) {
+    this.activeWatchers = /* @__PURE__ */ new Map();
+    this.balanceCache = /* @__PURE__ */ new Map();
+    this.CACHE_DURATION = 5e3;
+    this.client = client;
+  }
+  /**
+   * Watch balance changes for an address
+   */
+  watchBalance(address, chain, tokenAddress, onBalanceChange, options = {}) {
+    const opts = { ...DEFAULT_BALANCE_OPTIONS, ...options };
+    const watcherKey = `${chain.id}-${address}-${tokenAddress || "native"}`;
+    this.cancelBalanceWatch(watcherKey);
+    const pollBalance = async () => {
+      try {
+        const currentBalance = await this.getBalance(address, chain, tokenAddress);
+        const cached = this.balanceCache.get(watcherKey);
+        const previousBalance = cached?.balance;
+        if (!previousBalance || currentBalance !== previousBalance) {
+          const update = {
+            address,
+            tokenAddress,
+            balance: currentBalance,
+            previousBalance,
+            chainId: chain.id,
+            timestamp: Date.now()
+          };
+          onBalanceChange(update);
+        }
+        this.balanceCache.set(watcherKey, {
+          balance: currentBalance,
+          timestamp: Date.now()
+        });
+      } catch (error) {
+        console.error(`Error polling balance for ${watcherKey}:`, error);
+      }
+    };
+    pollBalance();
+    const interval = setInterval(pollBalance, opts.pollInterval);
+    this.activeWatchers.set(watcherKey, {
+      interval,
+      lastBalance: "0",
+      callback: onBalanceChange
+    });
+    return watcherKey;
+  }
+  /**
+   * Get current balance for an address
+   */
+  async getBalance(address, chain, tokenAddress, useCache = true) {
+    const cacheKey = `${chain.id}-${address}-${tokenAddress || "native"}`;
+    if (useCache) {
+      const cached = this.balanceCache.get(cacheKey);
+      if (cached && Date.now() - cached.timestamp < this.CACHE_DURATION) {
+        return cached.balance;
+      }
+    }
+    try {
+      let balance;
+      if (tokenAddress) {
+        const contract = thirdweb.getContract({
+          client: this.client,
+          chain,
+          address: tokenAddress
+        });
+        const balanceResult = await thirdweb.readContract({
+          contract,
+          method: "function balanceOf(address) view returns (uint256)",
+          params: [address]
+        });
+        balance = balanceResult.toString();
+      } else {
+        const balanceResult = await erc20.getNativeBalance({
+          client: this.client,
+          chain,
+          address
+        });
+        balance = balanceResult.value.toString();
+      }
+      this.balanceCache.set(cacheKey, {
+        balance,
+        timestamp: Date.now()
+      });
+      return balance;
+    } catch (error) {
+      console.error(`Error fetching balance for ${address}:`, error);
+      return "0";
+    }
+  }
+  /**
+   * Refresh balance after a transaction
+   */
+  async refreshBalanceAfterTransaction(transactionHash, address, chain, tokenAddress, maxWaitTime = 3e4) {
+    const startTime = Date.now();
+    const watcherKey = `${chain.id}-${address}-${tokenAddress || "native"}`;
+    const initialBalance = await this.getBalance(address, chain, tokenAddress, false);
+    const poll = async () => {
+      if (Date.now() - startTime > maxWaitTime) {
+        throw new Error("Balance refresh timeout");
+      }
+      const currentBalance = await this.getBalance(address, chain, tokenAddress, false);
+      if (currentBalance !== initialBalance) {
+        const update = {
+          address,
+          tokenAddress,
+          balance: currentBalance,
+          previousBalance: initialBalance,
+          chainId: chain.id,
+          timestamp: Date.now()
+        };
+        const watcher = this.activeWatchers.get(watcherKey);
+        if (watcher) {
+          watcher.callback(update);
+        }
+        return update;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 2e3));
+      return poll();
+    };
+    return poll();
+  }
+  /**
+   * Get balances across multiple chains
+   */
+  async getMultiChainBalances(address, chains, tokenAddresses = {}) {
+    const balancePromises = chains.map(async (chain) => {
+      try {
+        const nativeBalance = await this.getBalance(address, chain);
+        const tokenAddrs = tokenAddresses[chain.id] || [];
+        const tokenBalancePromises = tokenAddrs.map(async (tokenAddress) => ({
+          tokenAddress,
+          balance: await this.getBalance(address, chain, tokenAddress)
+        }));
+        const tokenBalances = await Promise.all(tokenBalancePromises);
+        const tokensMap = {};
+        tokenBalances.forEach(({ tokenAddress, balance }) => {
+          tokensMap[tokenAddress] = balance;
+        });
+        return {
+          chainId: chain.id,
+          native: nativeBalance,
+          tokens: tokensMap
+        };
+      } catch (error) {
+        console.error(`Error fetching balances for chain ${chain.id}:`, error);
+        return {
+          chainId: chain.id,
+          native: "0",
+          tokens: {}
+        };
+      }
+    });
+    const results = await Promise.all(balancePromises);
+    const balanceMap = {};
+    results.forEach((result) => {
+      balanceMap[result.chainId] = {
+        native: result.native,
+        tokens: result.tokens
+      };
+    });
+    return balanceMap;
+  }
+  /**
+   * Force refresh all cached balances
+   */
+  async refreshAllBalances() {
+    const refreshPromises = Array.from(this.activeWatchers.entries()).map(
+      async ([watcherKey, watcher]) => {
+        try {
+          const [chainId, address, tokenOrNative] = watcherKey.split("-");
+          const tokenAddress = tokenOrNative === "native" ? void 0 : tokenOrNative;
+          this.balanceCache.delete(watcherKey);
+          await this.getBalance(address, { id: parseInt(chainId) }, tokenAddress, false);
+        } catch (error) {
+          console.error(`Error refreshing balance for ${watcherKey}:`, error);
+        }
+      }
+    );
+    await Promise.all(refreshPromises);
+  }
+  /**
+   * Cancel a specific balance watch
+   */
+  cancelBalanceWatch(watcherKey) {
+    const watcher = this.activeWatchers.get(watcherKey);
+    if (watcher) {
+      clearInterval(watcher.interval);
+      this.activeWatchers.delete(watcherKey);
+      this.balanceCache.delete(watcherKey);
+    }
+  }
+  /**
+   * Cancel balance watch by parameters
+   */
+  cancelBalanceWatchFor(address, chainId, tokenAddress) {
+    const watcherKey = `${chainId}-${address}-${tokenAddress || "native"}`;
+    this.cancelBalanceWatch(watcherKey);
+  }
+  /**
+   * Cancel all balance watchers
+   */
+  cancelAllBalanceWatches() {
+    for (const [watcherKey, watcher] of this.activeWatchers) {
+      clearInterval(watcher.interval);
+    }
+    this.activeWatchers.clear();
+    this.balanceCache.clear();
+  }
+  /**
+   * Get active watchers count
+   */
+  getActiveWatchersCount() {
+    return this.activeWatchers.size;
+  }
+  /**
+   * Clear balance cache
+   */
+  clearCache() {
+    this.balanceCache.clear();
+  }
+  /**
+   * Get cached balance if available
+   */
+  getCachedBalance(address, chainId, tokenAddress) {
+    const cacheKey = `${chainId}-${address}-${tokenAddress || "native"}`;
+    const cached = this.balanceCache.get(cacheKey);
+    if (cached && Date.now() - cached.timestamp < this.CACHE_DURATION) {
+      return cached.balance;
+    }
+    return null;
+  }
+};
+
+// src/services/RelayStatusService.ts
+var DEFAULT_RELAY_OPTIONS = {
+  maxWaitTime: 6e5,
+  // 10 minutes
+  pollInterval: 5e3,
+  // 5 seconds
+  enableProgressUpdates: true
+};
+var RelayStatusService = class {
+  constructor(client) {
+    this.activeRelayWatchers = /* @__PURE__ */ new Map();
+    // Relay.link API endpoints (if available)
+    this.RELAY_API_BASE = "https://api.relay.link";
+    this.client = client;
+    this.transactionStatusService = new TransactionStatusService(client);
+  }
+  /**
+   * Track a relay transaction from source to destination
+   */
+  async trackRelay(relayId, sourceChain, destinationChain, sourceTransactionHash, options = {}) {
+    const opts = { ...DEFAULT_RELAY_OPTIONS, ...options };
+    if (this.activeRelayWatchers.has(relayId)) {
+      return this.activeRelayWatchers.get(relayId).promise;
+    }
+    const abortController = new AbortController();
+    const promise = this._trackRelayInternal(
+      relayId,
+      sourceChain,
+      destinationChain,
+      sourceTransactionHash,
+      opts,
+      abortController.signal
+    );
+    this.activeRelayWatchers.set(relayId, {
+      abort: abortController,
+      promise
+    });
+    promise.finally(() => {
+      this.activeRelayWatchers.delete(relayId);
+    });
+    return promise;
+  }
+  /**
+   * Track relay with callback for real-time updates
+   */
+  async trackRelayWithCallback(relayId, sourceChain, destinationChain, sourceTransactionHash, onUpdate, options = {}) {
+    const opts = { ...DEFAULT_RELAY_OPTIONS, ...options };
+    const startTime = Date.now();
+    let lastProgress = 0;
+    const poll = async () => {
+      try {
+        if (Date.now() - startTime > opts.maxWaitTime) {
+          const update = {
+            relayId,
+            status: "failed",
+            progress: lastProgress,
+            error: "Relay tracking timeout",
+            timestamp: Date.now()
+          };
+          onUpdate(update);
+          return {
+            relayId,
+            sourceChain: sourceChain.id,
+            destinationChain: destinationChain.id,
+            sourceTransactionHash,
+            status: "failed",
+            progress: lastProgress,
+            error: "Relay tracking timeout",
+            sourceAmount: "0",
+            tokenSymbol: "UNKNOWN"
+          };
+        }
+        const relayStatus = await this.getRelayStatus(
+          relayId,
+          sourceChain,
+          destinationChain,
+          sourceTransactionHash
+        );
+        if (relayStatus.progress !== lastProgress || opts.enableProgressUpdates) {
+          const update = {
+            relayId,
+            status: relayStatus.status,
+            progress: relayStatus.progress,
+            error: relayStatus.error,
+            timestamp: Date.now(),
+            destinationTransactionHash: relayStatus.destinationTransactionHash
+          };
+          onUpdate(update);
+          lastProgress = relayStatus.progress;
+        }
+        if (relayStatus.status === "completed" || relayStatus.status === "failed") {
+          return relayStatus;
+        }
+        await new Promise((resolve) => setTimeout(resolve, opts.pollInterval));
+        return poll();
+      } catch (error) {
+        const update = {
+          relayId,
+          status: "failed",
+          progress: lastProgress,
+          error: error instanceof Error ? error.message : "Unknown error",
+          timestamp: Date.now()
+        };
+        onUpdate(update);
+        throw error;
+      }
+    };
+    return poll();
+  }
+  /**
+   * Get current relay status
+   */
+  async getRelayStatus(relayId, sourceChain, destinationChain, sourceTransactionHash) {
+    try {
+      const sourceStatus = await this.transactionStatusService.getTransactionStatus(
+        sourceTransactionHash,
+        sourceChain
+      );
+      if (sourceStatus === "not_found" || sourceStatus === "failed") {
+        return {
+          relayId,
+          sourceChain: sourceChain.id,
+          destinationChain: destinationChain.id,
+          sourceTransactionHash,
+          status: "failed",
+          progress: 0,
+          error: sourceStatus === "not_found" ? "Source transaction not found" : "Source transaction failed",
+          sourceAmount: "0",
+          tokenSymbol: "UNKNOWN"
+        };
+      }
+      if (sourceStatus === "pending") {
+        return {
+          relayId,
+          sourceChain: sourceChain.id,
+          destinationChain: destinationChain.id,
+          sourceTransactionHash,
+          status: "pending",
+          progress: 25,
+          sourceAmount: "0",
+          tokenSymbol: "UNKNOWN"
+        };
+      }
+      try {
+        const apiStatus = await this.getRelayStatusFromAPI(relayId);
+        if (apiStatus) {
+          return apiStatus;
+        }
+      } catch (apiError) {
+        console.warn("Relay API unavailable, using fallback method:", apiError);
+      }
+      const sourceReceipt = await this.transactionStatusService.getTransactionReceipt(
+        sourceTransactionHash,
+        sourceChain
+      );
+      if (sourceReceipt) {
+        const elapsedTime = Date.now() - (sourceReceipt.timestamp || Date.now());
+        const estimatedRelayTime = this.getEstimatedRelayTime(sourceChain.id, destinationChain.id);
+        let progress = 50;
+        let status = "relaying";
+        if (elapsedTime > estimatedRelayTime) {
+          const destinationTxHash = await this.findDestinationTransaction(
+            sourceTransactionHash,
+            destinationChain,
+            relayId
+          );
+          if (destinationTxHash) {
+            const destStatus = await this.transactionStatusService.getTransactionStatus(
+              destinationTxHash,
+              destinationChain
+            );
+            if (destStatus === "confirmed") {
+              progress = 100;
+              status = "completed";
+            } else if (destStatus === "failed") {
+              status = "failed";
+              progress = 75;
+            }
+            return {
+              relayId,
+              sourceChain: sourceChain.id,
+              destinationChain: destinationChain.id,
+              sourceTransactionHash,
+              destinationTransactionHash: destinationTxHash,
+              status,
+              progress,
+              sourceAmount: "0",
+              tokenSymbol: "USDC"
+            };
+          }
+        } else {
+          progress = Math.min(95, 50 + elapsedTime / estimatedRelayTime * 45);
+        }
+        return {
+          relayId,
+          sourceChain: sourceChain.id,
+          destinationChain: destinationChain.id,
+          sourceTransactionHash,
+          status,
+          progress,
+          sourceAmount: "0",
+          tokenSymbol: "USDC",
+          estimatedCompletionTime: (sourceReceipt.timestamp || Date.now()) + estimatedRelayTime
+        };
+      }
+      return {
+        relayId,
+        sourceChain: sourceChain.id,
+        destinationChain: destinationChain.id,
+        sourceTransactionHash,
+        status: "initiated",
+        progress: 10,
+        sourceAmount: "0",
+        tokenSymbol: "UNKNOWN"
+      };
+    } catch (error) {
+      console.error("Error getting relay status:", error);
+      return {
+        relayId,
+        sourceChain: sourceChain.id,
+        destinationChain: destinationChain.id,
+        sourceTransactionHash,
+        status: "failed",
+        progress: 0,
+        error: error instanceof Error ? error.message : "Unknown error",
+        sourceAmount: "0",
+        tokenSymbol: "UNKNOWN"
+      };
+    }
+  }
+  /**
+   * Cancel relay tracking
+   */
+  cancelRelayTracking(relayId) {
+    const watcher = this.activeRelayWatchers.get(relayId);
+    if (watcher) {
+      watcher.abort.abort();
+      this.activeRelayWatchers.delete(relayId);
+    }
+  }
+  /**
+   * Cancel all relay tracking
+   */
+  cancelAllRelayTracking() {
+    for (const watcher of this.activeRelayWatchers.values()) {
+      watcher.abort.abort();
+    }
+    this.activeRelayWatchers.clear();
+  }
+  /**
+   * Get estimated relay time between chains
+   */
+  getEstimatedRelayTime(sourceChainId, destinationChainId) {
+    let baseTime = 12e4;
+    const slowChains = [1, 137, 10];
+    if (slowChains.includes(sourceChainId)) {
+      baseTime += 6e4;
+    }
+    if (destinationChainId === 33139) {
+      baseTime -= 3e4;
+    }
+    return Math.max(6e4, baseTime);
+  }
+  /**
+   * Try to get relay status from Relay.link API
+   */
+  async getRelayStatusFromAPI(relayId) {
+    try {
+      const response = await fetch(`${this.RELAY_API_BASE}/status/${relayId}`);
+      if (!response.ok) {
+        return null;
+      }
+      const data = await response.json();
+      return {
+        relayId,
+        sourceChain: data.sourceChain,
+        destinationChain: data.destinationChain,
+        sourceTransactionHash: data.sourceTx,
+        destinationTransactionHash: data.destTx,
+        status: this.mapApiStatusToRelayStatus(data.status),
+        progress: data.progress || 0,
+        sourceAmount: data.sourceAmount || "0",
+        destinationAmount: data.destAmount,
+        tokenSymbol: data.token || "USDC",
+        estimatedCompletionTime: data.eta,
+        actualCompletionTime: data.completedAt
+      };
+    } catch (error) {
+      console.warn("Failed to fetch from Relay API:", error);
+      return null;
+    }
+  }
+  /**
+   * Map API status to our RelayStatus
+   */
+  mapApiStatusToRelayStatus(apiStatus) {
+    switch (apiStatus?.toLowerCase()) {
+      case "pending":
+        return "pending";
+      case "processing":
+      case "bridging":
+        return "relaying";
+      case "completed":
+      case "success":
+        return "completed";
+      case "failed":
+      case "error":
+        return "failed";
+      default:
+        return "initiated";
+    }
+  }
+  /**
+   * Try to find the destination transaction by looking for patterns
+   */
+  async findDestinationTransaction(sourceTransactionHash, destinationChain, relayId) {
+    try {
+      return null;
+    } catch (error) {
+      console.error("Error finding destination transaction:", error);
+      return null;
+    }
+  }
+  /**
+   * Generate a unique relay ID based on transaction hash and timestamp
+   */
+  static generateRelayId(transactionHash, timestamp) {
+    const ts = timestamp || Date.now();
+    return `relay_${transactionHash.slice(2, 10)}_${ts}`;
+  }
+  /**
+   * Internal tracking implementation
+   */
+  async _trackRelayInternal(relayId, sourceChain, destinationChain, sourceTransactionHash, options, signal) {
+    const startTime = Date.now();
+    const poll = async () => {
+      if (signal.aborted) {
+        throw new Error("Relay tracking was cancelled");
+      }
+      if (Date.now() - startTime > options.maxWaitTime) {
+        return {
+          relayId,
+          sourceChain: sourceChain.id,
+          destinationChain: destinationChain.id,
+          sourceTransactionHash,
+          status: "failed",
+          progress: 0,
+          error: "Relay tracking timeout",
+          sourceAmount: "0",
+          tokenSymbol: "UNKNOWN"
+        };
+      }
+      const relayStatus = await this.getRelayStatus(
+        relayId,
+        sourceChain,
+        destinationChain,
+        sourceTransactionHash
+      );
+      if (relayStatus.status === "completed" || relayStatus.status === "failed") {
+        return relayStatus;
+      }
+      await new Promise((resolve) => setTimeout(resolve, options.pollInterval));
+      return poll();
+    };
+    return poll();
+  }
+};
 var ApeChainTippingSDK = class {
   constructor(config) {
     if (!config.clientId) {
@@ -98,6 +987,9 @@ var ApeChainTippingSDK = class {
     this.config = config;
     this.client = thirdweb.createThirdwebClient({ clientId: config.clientId });
     this.relayService = new ApeChainRelayService();
+    this.transactionStatus = new TransactionStatusService(this.client);
+    this.balanceWatcher = new BalanceWatcherService(this.client);
+    this.relayStatus = new RelayStatusService(this.client);
   }
   getContractAddress(chainId) {
     if (this.config.streamingPlatformAddresses && this.config.streamingPlatformAddresses[chainId]) {
@@ -1197,8 +2089,8 @@ var ApeChainTippingSDK = class {
   async getNativeBalance(walletAddress, chainId) {
     const chain = this.getChainById(chainId);
     try {
-      const { getRpcClient } = await import('thirdweb/rpc');
-      const rpcRequest = getRpcClient({ client: this.client, chain });
+      const { getRpcClient: getRpcClient2 } = await import('thirdweb/rpc');
+      const rpcRequest = getRpcClient2({ client: this.client, chain });
       const balance = await rpcRequest({
         method: "eth_getBalance",
         params: [walletAddress, "latest"]
@@ -1467,6 +2359,9 @@ Object.defineProperty(exports, "isContractDeployed", {
 });
 exports.ApeChainRelayService = ApeChainRelayService;
 exports.ApeChainTippingSDK = ApeChainTippingSDK;
+exports.BalanceWatcherService = BalanceWatcherService;
 exports.DEFAULT_CONFIG = DEFAULT_CONFIG;
+exports.RelayStatusService = RelayStatusService;
+exports.TransactionStatusService = TransactionStatusService;
 //# sourceMappingURL=index.cjs.map
 //# sourceMappingURL=index.cjs.map
