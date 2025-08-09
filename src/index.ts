@@ -31,6 +31,14 @@ export type {
   RewardPoolCalculation,
 } from './types/viewer-rewards';
 
+export type {
+  TokenInfo,
+  TokenBalance,
+  ApprovalStatus,
+  ApprovalResult,
+  MultiTokenBalanceResponse,
+} from './types/token-balance';
+
 // Re-export from contracts-interface
 export { 
   MembershipTier,

@@ -306,6 +306,59 @@ declare class ApeChainTippingSDK {
      * Check if address is the contract owner
      */
     isOwner(chainId: number, address: string): Promise<boolean>;
+    /**
+     * Get native token balance for a wallet
+     * @param walletAddress Wallet address to check
+     * @param chainId Chain ID
+     * @returns Balance in wei as string
+     */
+    getNativeBalance(walletAddress: string, chainId: number): Promise<string>;
+    /**
+     * Get ERC20 token balance for a wallet
+     * @param walletAddress Wallet address to check
+     * @param tokenAddress Token contract address
+     * @param chainId Chain ID
+     * @returns Balance in token units as string
+     */
+    getTokenBalance(walletAddress: string, tokenAddress: string, chainId: number): Promise<string>;
+    /**
+     * Get balances for multiple tokens
+     * @param walletAddress Wallet address to check
+     * @param tokenAddresses Array of token addresses ('native' for native token)
+     * @param chainId Chain ID
+     * @returns Object mapping token addresses to balance strings
+     */
+    getMultipleTokenBalances(walletAddress: string, tokenAddresses: string[], chainId: number): Promise<Record<string, string>>;
+    /**
+     * Check ERC20 token allowance
+     * @param tokenAddress Token contract address
+     * @param ownerAddress Owner wallet address
+     * @param spenderAddress Spender contract address
+     * @param chainId Chain ID
+     * @returns Allowance amount as string
+     */
+    checkAllowance(tokenAddress: string, ownerAddress: string, spenderAddress: string, chainId: number): Promise<string>;
+    /**
+     * Check if token needs approval for spending
+     * @param tokenAddress Token contract address
+     * @param ownerAddress Owner wallet address
+     * @param spenderAddress Spender contract address
+     * @param amount Amount to spend
+     * @param chainId Chain ID
+     * @returns True if approval is needed
+     */
+    needsApproval(tokenAddress: string, ownerAddress: string, spenderAddress: string, amount: string, chainId: number): Promise<boolean>;
+    /**
+     * Get token information (name, symbol, decimals)
+     * @param tokenAddress Token contract address
+     * @param chainId Chain ID
+     * @returns Token info object
+     */
+    getTokenInfo(tokenAddress: string, chainId: number): Promise<{
+        name: string;
+        symbol: string;
+        decimals: number;
+    }>;
 }
 
 interface RelayQuote {
@@ -357,6 +410,31 @@ declare class ApeChainRelayService {
     private makeRequest;
 }
 
+interface TokenInfo {
+    name: string;
+    symbol: string;
+    decimals: number;
+}
+interface TokenBalance {
+    tokenAddress: string;
+    balance: string;
+    symbol: string;
+    decimals: number;
+}
+interface ApprovalStatus {
+    isApproved: boolean;
+    currentAllowance: string;
+    requiredAmount: string;
+}
+interface ApprovalResult {
+    success: boolean;
+    transactionHash?: string;
+    error?: string;
+}
+interface MultiTokenBalanceResponse {
+    [tokenAddress: string]: string;
+}
+
 declare const DEFAULT_CONFIG: {
     readonly environment: "production";
     readonly endpoints: {
@@ -364,4 +442,4 @@ declare const DEFAULT_CONFIG: {
     };
 };
 
-export { ApeChainRelayService, type ApeChainTippingConfig, ApeChainTippingSDK, type BatchViewerRewardParams, type Creator, type CreatorRegistration, DEFAULT_CONFIG, type PlatformStats, type RelayQuote, type RelayResult, type RewardPoolCalculation, type RewardPoolParams, type RewardPoolResult, type TipParams, type TipResult, type ViewerInfo, type ViewerRegistration, type ViewerReward, type ViewerRewardParams, type ViewerRewardResult, type ViewerRewardStats, type ViewerRewardsPlatformStats };
+export { ApeChainRelayService, type ApeChainTippingConfig, ApeChainTippingSDK, type ApprovalResult, type ApprovalStatus, type BatchViewerRewardParams, type Creator, type CreatorRegistration, DEFAULT_CONFIG, type MultiTokenBalanceResponse, type PlatformStats, type RelayQuote, type RelayResult, type RewardPoolCalculation, type RewardPoolParams, type RewardPoolResult, type TipParams, type TipResult, type TokenBalance, type TokenInfo, type ViewerInfo, type ViewerRegistration, type ViewerReward, type ViewerRewardParams, type ViewerRewardResult, type ViewerRewardStats, type ViewerRewardsPlatformStats };

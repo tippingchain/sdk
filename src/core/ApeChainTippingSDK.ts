@@ -1377,5 +1377,215 @@ export class ApeChainTippingSDK {
     const owner = await this.getOwner(chainId);
     return owner.toLowerCase() === address.toLowerCase();
   }
+
+  // ===== TOKEN BALANCE AND APPROVAL METHODS =====
+
+  /**
+   * Get native token balance for a wallet
+   * @param walletAddress Wallet address to check
+   * @param chainId Chain ID
+   * @returns Balance in wei as string
+   */
+  async getNativeBalance(walletAddress: string, chainId: number): Promise<string> {
+    // For now, return placeholder until we implement proper native balance checking
+    // This will be updated when we get the proper thirdweb balance API working
+    console.log(`Getting native balance for ${walletAddress} on chain ${chainId}`);
+    return '0'; // Placeholder - real implementation coming next
+  }
+
+  /**
+   * Get ERC20 token balance for a wallet
+   * @param walletAddress Wallet address to check
+   * @param tokenAddress Token contract address
+   * @param chainId Chain ID
+   * @returns Balance in token units as string
+   */
+  async getTokenBalance(walletAddress: string, tokenAddress: string, chainId: number): Promise<string> {
+    if (tokenAddress === 'native') {
+      return this.getNativeBalance(walletAddress, chainId);
+    }
+
+    const chain = this.getChainById(chainId);
+    
+    try {
+      const tokenContract = getContract({
+        client: this.client,
+        chain,
+        address: tokenAddress,
+      });
+
+      const balance = await readContract({
+        contract: tokenContract,
+        method: 'function balanceOf(address) view returns (uint256)',
+        params: [walletAddress],
+      });
+
+      return (balance as bigint).toString();
+    } catch (error) {
+      console.error(`Failed to get token balance for ${walletAddress} on chain ${chainId}:`, error);
+      return '0';
+    }
+  }
+
+  /**
+   * Get balances for multiple tokens
+   * @param walletAddress Wallet address to check
+   * @param tokenAddresses Array of token addresses ('native' for native token)
+   * @param chainId Chain ID
+   * @returns Object mapping token addresses to balance strings
+   */
+  async getMultipleTokenBalances(
+    walletAddress: string, 
+    tokenAddresses: string[], 
+    chainId: number
+  ): Promise<Record<string, string>> {
+    const balances: Record<string, string> = {};
+
+    // Fetch all balances in parallel for better performance
+    const balancePromises = tokenAddresses.map(async (tokenAddress) => {
+      const balance = await this.getTokenBalance(walletAddress, tokenAddress, chainId);
+      return { tokenAddress, balance };
+    });
+
+    const results = await Promise.allSettled(balancePromises);
+    
+    results.forEach((result, index) => {
+      const tokenAddress = tokenAddresses[index];
+      if (result.status === 'fulfilled') {
+        balances[tokenAddress] = result.value.balance;
+      } else {
+        console.warn(`Failed to get balance for token ${tokenAddress}:`, result.reason);
+        balances[tokenAddress] = '0';
+      }
+    });
+
+    return balances;
+  }
+
+  /**
+   * Check ERC20 token allowance
+   * @param tokenAddress Token contract address
+   * @param ownerAddress Owner wallet address
+   * @param spenderAddress Spender contract address
+   * @param chainId Chain ID
+   * @returns Allowance amount as string
+   */
+  async checkAllowance(
+    tokenAddress: string, 
+    ownerAddress: string, 
+    spenderAddress: string, 
+    chainId: number
+  ): Promise<string> {
+    if (tokenAddress === 'native') {
+      return '0'; // Native tokens don't need approval
+    }
+
+    const chain = this.getChainById(chainId);
+    
+    try {
+      const tokenContract = getContract({
+        client: this.client,
+        chain,
+        address: tokenAddress,
+      });
+
+      const allowance = await readContract({
+        contract: tokenContract,
+        method: 'function allowance(address owner, address spender) view returns (uint256)',
+        params: [ownerAddress, spenderAddress],
+      });
+
+      return (allowance as bigint).toString();
+    } catch (error) {
+      console.error(`Failed to check allowance for ${tokenAddress}:`, error);
+      return '0';
+    }
+  }
+
+  /**
+   * Check if token needs approval for spending
+   * @param tokenAddress Token contract address
+   * @param ownerAddress Owner wallet address
+   * @param spenderAddress Spender contract address
+   * @param amount Amount to spend
+   * @param chainId Chain ID
+   * @returns True if approval is needed
+   */
+  async needsApproval(
+    tokenAddress: string,
+    ownerAddress: string,
+    spenderAddress: string,
+    amount: string,
+    chainId: number
+  ): Promise<boolean> {
+    if (tokenAddress === 'native') {
+      return false; // Native tokens don't need approval
+    }
+
+    const allowance = await this.checkAllowance(tokenAddress, ownerAddress, spenderAddress, chainId);
+    return BigInt(allowance) < BigInt(amount);
+  }
+
+  /**
+   * Get token information (name, symbol, decimals)
+   * @param tokenAddress Token contract address
+   * @param chainId Chain ID
+   * @returns Token info object
+   */
+  async getTokenInfo(tokenAddress: string, chainId: number): Promise<{
+    name: string;
+    symbol: string;
+    decimals: number;
+  }> {
+    if (tokenAddress === 'native') {
+      const chain = this.getChainById(chainId);
+      return {
+        name: chain.nativeCurrency?.name || 'Ether',
+        symbol: chain.nativeCurrency?.symbol || 'ETH',
+        decimals: chain.nativeCurrency?.decimals || 18,
+      };
+    }
+
+    const chain = this.getChainById(chainId);
+    
+    try {
+      const tokenContract = getContract({
+        client: this.client,
+        chain,
+        address: tokenAddress,
+      });
+
+      const [name, symbol, decimals] = await Promise.all([
+        readContract({
+          contract: tokenContract,
+          method: 'function name() view returns (string)',
+          params: [],
+        }).catch(() => 'Unknown'),
+        readContract({
+          contract: tokenContract,
+          method: 'function symbol() view returns (string)',
+          params: [],
+        }).catch(() => 'UNK'),
+        readContract({
+          contract: tokenContract,
+          method: 'function decimals() view returns (uint8)',
+          params: [],
+        }).catch(() => 18),
+      ]);
+
+      return {
+        name: name as string,
+        symbol: symbol as string,
+        decimals: Number(decimals),
+      };
+    } catch (error) {
+      console.error(`Failed to get token info for ${tokenAddress}:`, error);
+      return {
+        name: 'Unknown',
+        symbol: 'UNK',
+        decimals: 18,
+      };
+    }
+  }
 }
 
