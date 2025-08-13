@@ -1,6 +1,6 @@
 {
   "name": "@tippingchain/sdk",
-  "version": "2.4.1",
+  "version": "2.4.2",
   "type": "module",
   "description": "TippingChain SDK - On-chain tipping with USDC payouts on ApeChain",
   "main": "./dist/index.js",
