@@ -1,0 +1,39 @@
+# Source files
+src/
+examples/
+tsconfig.json
+tsconfig.tsbuildinfo
+rollup.config.js
+jest.config.cjs
+
+# Development files
+.eslintrc.cjs
+.gitignore
+
+# Test files
+__tests__/
+*.test.ts
+*.test.js
+coverage/
+
+# Editor directories
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Dependency directories
+node_modules/
+
+# Build artifacts (except dist)
+*.log
+*.tmp
+.cache/
+
+# Documentation source
+docs/
+
+# Development scripts
+scripts/

@@ -1,0 +1,71 @@
+{
+  "name": "@tippingchain/sdk",
+  "version": "2.4.1",
+  "type": "module",
+  "description": "TippingChain SDK - On-chain tipping with USDC payouts on ApeChain",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "author": "TippingChain Team",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/tippingchain/sdk.git",
+    "directory": "packages/sdk"
+  },
+  "homepage": "https://github.com/tippingchain/sdk#readme",
+  "bugs": {
+    "url": "https://github.com/tippingchain/sdk/issues"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "lint": "eslint src/**/*.ts",
+    "lint:fix": "eslint src/**/*.ts --fix",
+    "prepublishOnly": "rm -rf dist && ./node_modules/.bin/tsup",
+    "clean": "rm -rf dist"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "apechain",
+    "tipping",
+    "crypto",
+    "multi-chain",
+    "web3",
+    "ethereum",
+    "polygon",
+    "optimism",
+    "bsc",
+    "cross-chain",
+    "defi"
+  ],
+  "dependencies": {
+    "@tippingchain/contracts-interface": "^1.4.1",
+    "ethers": "^6.0.0"
+  },
+  "peerDependencies": {
+    "thirdweb": "^5.0.0"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.0.0",
+    "@types/node": "^20.0.0",
+    "@types/react": "^19.1.9",
+    "@typescript-eslint/eslint-plugin": "^6.0.0",
+    "@typescript-eslint/parser": "^6.0.0",
+    "eslint": "^8.0.0",
+    "jest": "^29.0.0",
+    "rimraf": "^5.0.0",
+    "ts-jest": "^29.0.0",
+    "tsup": "^8.5.0",
+    "typescript": "^5.9.2"
+  }
+}
