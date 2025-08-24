@@ -1,6 +1,6 @@
 {
   "name": "@tippingchain/sdk",
-  "version": "2.5.0",
+  "version": "2.5.1",
   "type": "module",
   "description": "TippingChain SDK - On-chain tipping with USDC payouts on ApeChain",
   "main": "./dist/index.js",
@@ -49,7 +49,7 @@
     "defi"
   ],
   "dependencies": {
-    "@tippingchain/contracts-interface": "^1.5.0",
+    "@tippingchain/contracts-interface": "^1.5.1",
     "ethers": "^6.0.0"
   },
   "peerDependencies": {
