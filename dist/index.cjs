@@ -9,7 +9,7 @@ var ApeChainRelayService = class {
   constructor() {
     this.APECHAIN_ID = contractsInterface.SUPPORTED_CHAINS.APECHAIN;
     this.USDC_TOKEN_ADDRESS = contractsInterface.CONTRACT_CONSTANTS.APECHAIN_USDC;
-    this.baseUrl = "https://api.relay.link";
+    this.baseUrl = process.env.NODE_ENV === "production" ? "https://api.relay.link" : "https://api.testnets.relay.link";
   }
   /**
    * Get a quote for relaying tokens to ApeChain (for estimation purposes)

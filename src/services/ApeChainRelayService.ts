@@ -33,7 +33,7 @@ export interface QuoteRequestParams {
 export class ApeChainRelayService {
   private readonly APECHAIN_ID = SUPPORTED_CHAINS.APECHAIN;
   private readonly USDC_TOKEN_ADDRESS = CONTRACT_CONSTANTS.APECHAIN_USDC;
-  private readonly baseUrl: string = 'https://api.relay.link';
+  private readonly baseUrl: string = process.env.NODE_ENV === 'production' ? 'https://api.relay.link' : 'https://api.testnets.relay.link';
 
   /**
    * Get a quote for relaying tokens to ApeChain (for estimation purposes)
