@@ -351,7 +351,7 @@ export class ApeChainTippingSDK {
       abi: TypedABI,
     });
 
-    const creatorInfo = await this.readContract(contract, "getCreatorInfo", [BigInt(creatorId)]) as [string, boolean, bigint, bigint, number, bigint];
+    const creatorInfo = await this.readContract(contract, "function getCreatorInfo(uint256 creatorId) view returns (address wallet, bool active, uint256 totalTips, uint256 tipCount, uint8 tier, uint256 creatorShareBps)", [BigInt(creatorId)]) as [string, boolean, bigint, bigint, number, bigint];
     
     return {
       id: creatorId,
@@ -480,7 +480,7 @@ export class ApeChainTippingSDK {
 
     const result = await this.readContract(
       contract, 
-      "calculateTipSplits", 
+      "function calculateTipSplits(uint256 creatorId, uint256 tipAmount) view returns (uint256 platformFee, uint256 creatorAmount, uint256 businessAmount)", 
       [BigInt(creatorId), BigInt(tipAmount)]
     ) as [bigint, bigint, bigint];
 
@@ -581,11 +581,11 @@ export class ApeChainTippingSDK {
         // Try to get creator info for totalTips
         const creatorInfo = await this.readContract(
           contract,
-          "getCreatorInfo", 
+          "function getCreatorInfo(uint256 creatorId) view returns (address wallet, bool active, uint256 totalTips, uint256 tipCount, uint8 tier, uint256 creatorShareBps)", 
           [BigInt(creator.id)]
-        ) as [string, bigint, boolean, bigint, string];
+        ) as [string, boolean, bigint, bigint, number, bigint];
         
-        creator.totalTips = creatorInfo[1].toString(); // Total tips received
+        creator.totalTips = creatorInfo[2].toString(); // Total tips received
         creator.tipCount = Number(creatorInfo[3]); // Tip count
       } catch (error) {
         // If getCreatorInfo is not available, keep defaults

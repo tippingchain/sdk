@@ -1180,7 +1180,7 @@ var ApeChainTippingSDK = class {
       address: contractAddress,
       abi: TypedABI
     });
-    const creatorInfo = await this.readContract(contract, "getCreatorInfo", [BigInt(creatorId)]);
+    const creatorInfo = await this.readContract(contract, "function getCreatorInfo(uint256 creatorId) view returns (address wallet, bool active, uint256 totalTips, uint256 tipCount, uint8 tier, uint256 creatorShareBps)", [BigInt(creatorId)]);
     return {
       id: creatorId,
       wallet: creatorInfo[0],
@@ -1293,7 +1293,7 @@ var ApeChainTippingSDK = class {
     });
     const result = await this.readContract(
       contract,
-      "calculateTipSplits",
+      "function calculateTipSplits(uint256 creatorId, uint256 tipAmount) view returns (uint256 platformFee, uint256 creatorAmount, uint256 businessAmount)",
       [BigInt(creatorId), BigInt(tipAmount)]
     );
     return {
@@ -1375,10 +1375,10 @@ var ApeChainTippingSDK = class {
       try {
         const creatorInfo = await this.readContract(
           contract,
-          "getCreatorInfo",
+          "function getCreatorInfo(uint256 creatorId) view returns (address wallet, bool active, uint256 totalTips, uint256 tipCount, uint8 tier, uint256 creatorShareBps)",
           [BigInt(creator.id)]
         );
-        creator.totalTips = creatorInfo[1].toString();
+        creator.totalTips = creatorInfo[2].toString();
         creator.tipCount = Number(creatorInfo[3]);
       } catch (error) {
         console.warn(`Failed to get creator info for ID ${creator.id}:`, error);
