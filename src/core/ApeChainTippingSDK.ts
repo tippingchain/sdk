@@ -652,10 +652,10 @@ export class ApeChainTippingSDK {
         },
       }),
       // Testnets
-      17000: defineChain({
-        id: 17000,
-        name: 'Ethereum Holesky',
-        rpc: 'https://ethereum-holesky-rpc.publicnode.com',
+      421614: defineChain({
+        id: 421614,
+        name: 'Arbitrum Sepolia',
+        rpc: 'https://sepolia-rollup.arbitrum.io/rpc',
         nativeCurrency: {
           name: 'Ethereum',
           symbol: 'ETH',
@@ -672,13 +672,13 @@ export class ApeChainTippingSDK {
           decimals: 18,
         },
       }),
-      33111: defineChain({
-        id: 33111,
-        name: 'ApeChain Curtis (Testnet)',
-        rpc: 'https://curtis.rpc.caldera.xyz/http',
+      84532: defineChain({
+        id: 84532,
+        name: 'Base Sepolia',
+        rpc: 'https://sepolia.base.org',
         nativeCurrency: {
-          name: 'APE',
-          symbol: 'APE',
+          name: 'Ethereum',
+          symbol: 'ETH',
           decimals: 18,
         },
       }),
@@ -1375,9 +1375,9 @@ export class ApeChainTippingSDK {
       42161: 2000,  // ETH on Arbitrum
       167000: 2000, // ETH on Taiko
       // Testnets (same rates as mainnet for estimation)
-      17000: 2000,  // ETH on Holesky
+      421614: 2000, // ETH on Arbitrum Sepolia
       80002: 0.8,   // MATIC on Amoy
-      33111: 1      // APE on Curtis testnet
+      84532: 2000   // ETH on Base Sepolia
     };
 
     const rate = estimateRates[chainId] || 1;

@@ -49,7 +49,7 @@
     "defi"
   ],
   "dependencies": {
-    "@tippingchain/contracts-interface": "^1.6.0",
+    "@tippingchain/contracts-interface": "^1.6.1",
     "ethers": "^6.0.0"
   },
   "peerDependencies": {

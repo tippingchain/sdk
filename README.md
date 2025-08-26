@@ -1,18 +1,19 @@
 # @tippingchain/sdk
 
-TypeScript SDK for TippingChain v2.4.0 - a unified multi-chain tipping platform with integrated Relay.link bridging, creator registry, and viewer rewards. Enable users to tip content creators using creator IDs from 9 source chains with automatic USDC payouts on ApeChain.
+TypeScript SDK for TippingChain v2.6.0 - a unified multi-chain tipping platform with integrated Relay.link bridging, creator registry, and viewer rewards. Enable users to tip content creators using creator IDs from 9 source chains with automatic USDC payouts on ApeChain.
 
-## Version 2.4.0 Updates
+## Version 2.6.0 Updates
 
-- ✨ **Full Contract Coverage**: Added support for all functions defined in `@tippingchain/contracts-interface` v1.4.0.
-- 🔐 **Enhanced Admin Role System**: New methods for managing authorized relayers and contract state.
-- 🛠️ **Advanced Queries**: Added support for detailed statistics and paginated creator data.
-- 🚨 **Emergency Operations**: Implemented emergency withdrawal functionality for admins.
-- 🧪 **Updated Testnets**: Holesky (Ethereum) and Amoy (Polygon) replace deprecated networks.
-- 📱 **Enhanced Viewer Rewards**: Full support for batch rewards and viewer registration.
-- 🔗 **Improved Thirdweb**: Better thirdweb account ID integration throughout.
-- 🎯 **Simplified Architecture**: 50% reduction in contract complexity with unified design.
-- 🔒 **Type Safety Fixes**: Resolved TypeScript compatibility issues with thirdweb ABI integration.
+- ✨ **Updated Testnet Support**: Complete migration from deprecated Holesky/Curtis to active Arbitrum Sepolia (421614) and Base Sepolia (84532)
+- 🌐 **Enhanced Chain Definitions**: Updated all chain configurations with current testnet networks and proper RPC endpoints
+- 🔧 **Improved Contract Integration**: Enhanced thirdweb SDK integration with full function signature resolution for contract methods
+- 📊 **Updated Fee Calculations**: Accurate 5% platform fee for tips, 1% for viewer rewards with tier-based creator splits
+- 🧪 **Production-Ready Testnet**: Full end-to-end cross-chain testing flow with real Relay.link bridging Arbitrum Sepolia → Base Sepolia
+- 📦 **Package Alignment**: Compatible with @tippingchain/contracts-interface v1.6.0 and ui-react v2.6.0
+- 🔗 **Enhanced Relay Service**: Improved ApeChainRelayService with testnet API support and better error handling
+- 💰 **Updated Token Support**: Current testnet token addresses and configurations for USDC on supported chains
+- 🔒 **Improved Type Safety**: Better TypeScript integration with thirdweb v5 and enhanced method resolution
+- 🎯 **Enhanced Error Handling**: Better error messages and debugging support for testnet development
 
 ## Features
 
@@ -51,7 +52,7 @@ const sdk = new ApeChainTippingSDK({
 const testnetSdk = new ApeChainTippingSDK({
   clientId: 'your-thirdweb-client-id',
   environment: 'development',
-  useTestnet: true // Uses Holesky, Amoy, and Curtis testnet addresses
+  useTestnet: true // Uses Arbitrum Sepolia (421614) and Base Sepolia (84532) for cross-chain testing
 });
 ```
 
@@ -85,12 +86,12 @@ const creatorId = await sdk.addCreator({
 ### 3. Send a Tip
 
 ```typescript
-// Send native token tip using creator ID
+// Send native token tip using creator ID (testnet example)
 const result = await sdk.sendTip({
-  sourceChainId: SUPPORTED_CHAINS.POLYGON,
+  sourceChainId: 421614, // Arbitrum Sepolia testnet
   creatorId: 1, // Use creator ID instead of wallet address
   token: 'native',
-  amount: '1000000000000000000', // 1 MATIC in wei
+  amount: '10000000000000000', // 0.01 ETH in wei (testnet amount)
 });
 
 if (result.success) {
@@ -103,40 +104,40 @@ if (result.success) {
 ### 4. Creator Management
 
 ```typescript
-// Get creator info by ID
-const creator = await sdk.getCreator(1, SUPPORTED_CHAINS.POLYGON);
+// Get creator info by ID (testnet example)
+const creator = await sdk.getCreator(1, 421614); // Arbitrum Sepolia
 console.log(`Creator: ${creator.wallet}, Tips: ${creator.totalTips}`);
 
 // Find creator by wallet address
-const creator2 = await sdk.getCreatorByWallet('0x...', SUPPORTED_CHAINS.POLYGON);
+const creator2 = await sdk.getCreatorByWallet('0x479945d7931baC3343967bD0f839f8691E54a66e', 421614);
 
 // Update creator wallet (for lost wallet recovery) - requires admin permissions
-await sdk.updateCreatorWallet(1, '0xNewWalletAddress', SUPPORTED_CHAINS.POLYGON);
+await sdk.updateCreatorWallet(1, '0xNewWalletAddress', 421614);
 
-// Admin management functions (contract owner only)
-await sdk.grantAdmin('0xAdminWalletAddress', SUPPORTED_CHAINS.POLYGON);
-await sdk.revokeAdmin('0xAdminWalletAddress', SUPPORTED_CHAINS.POLYGON);
-const isAdmin = await sdk.isAdmin('0xWalletAddress', SUPPORTED_CHAINS.POLYGON);
+// Admin management functions (contract owner only) - testnet examples
+await sdk.grantAdmin('0x29aE0362FcF55cc646fD83B6E0DeB433FF7e019b', 421614); // Testnet admin
+await sdk.revokeAdmin('0xAdminWalletAddress', 421614);
+const isAdmin = await sdk.isAdmin('0x29aE0362FcF55cc646fD83B6E0DeB433FF7e019b', 421614);
 
 // Get platform statistics
-const stats = await sdk.getPlatformStats(SUPPORTED_CHAINS.POLYGON);
+const stats = await sdk.getPlatformStats(421614); // Arbitrum Sepolia
 console.log(`Active Creators: ${stats.activeCreators}`);
 console.log(`Total Tips: ${stats.totalTips}`);
 
 // Get top creators leaderboard
-const topCreators = await sdk.getTopCreators(10, SUPPORTED_CHAINS.POLYGON);
+const topCreators = await sdk.getTopCreators(10, 421614);
 ```
 
 ### 5. Viewer Rewards
 
 ```typescript
-// Send a reward to a viewer (creators only)
+// Send a reward to a viewer (creators only) - testnet example
 const rewardResult = await sdk.rewardViewer({
-  viewerAddress: '0x1234567890123456789012345678901234567890',
-  amount: '100000000000000000', // 0.1 MATIC in wei
+  viewerAddress: '0x65dF34504D2a5D96f4478544D5279B12b3fbEA87', // Test tipper wallet
+  amount: '10000000000000000', // 0.01 ETH in wei (testnet amount)
   reason: 'Great question during the stream!',
-  token: 'native', // or ERC20 token address
-  chainId: SUPPORTED_CHAINS.POLYGON
+  token: 'native',
+  chainId: 421614 // Arbitrum Sepolia testnet
 });
 
 if (rewardResult.success) {
@@ -160,131 +161,131 @@ const rewardByThirdwebId = await sdk.rewardViewer({
   reason: 'Great contribution!'
 });
 
-// Batch reward multiple viewers (gas efficient)
+// Batch reward multiple viewers (gas efficient) - testnet example
 const batchResult = await sdk.batchRewardViewers({
   viewers: [
-    { address: '0x...', amount: '50000000000000000', reason: 'Active participant' },
-    { address: '0x...', amount: '100000000000000000', reason: 'Best question' },
-    { address: '0x...', amount: '75000000000000000', reason: 'Helpful feedback' }
+    { address: '0x65dF34504D2a5D96f4478544D5279B12b3fbEA87', amount: '5000000000000000', reason: 'Active participant' },
+    { address: '0x29aE0362FcF55cc646fD83B6E0DeB433FF7e019b', amount: '10000000000000000', reason: 'Best question' },
+    { address: '0x479945d7931baC3343967bD0f839f8691E54a66e', amount: '7500000000000000', reason: 'Helpful feedback' }
   ],
-  chainId: SUPPORTED_CHAINS.POLYGON
+  chainId: 421614 // Arbitrum Sepolia testnet
 });
 
 // Check viewer reward stats
-const stats = await sdk.getViewerRewardStats('0x...', SUPPORTED_CHAINS.POLYGON);
+const stats = await sdk.getViewerRewardStats('0x65dF34504D2a5D96f4478544D5279B12b3fbEA87', 421614);
 console.log(`Total rewards given: ${stats.totalRewardsGiven}`);
 console.log(`Total rewards received: ${stats.totalRewardsReceived}`);
 console.log(`Number of rewards sent: ${stats.rewardCount}`);
 
 // Check if viewer rewards are enabled
-const enabled = await sdk.areViewerRewardsEnabled(SUPPORTED_CHAINS.POLYGON);
+const enabled = await sdk.areViewerRewardsEnabled(421614); // Arbitrum Sepolia
 console.log(`Viewer rewards enabled: ${enabled}`);
 
 // Enable or disable viewer rewards (admin only)
-await sdk.setViewerRewardsEnabled(true, SUPPORTED_CHAINS.POLYGON);
+await sdk.setViewerRewardsEnabled(true, 421614);
 
-// Check viewer's USDC balance on ApeChain
-const usdcBalance = await sdk.getViewerUsdcBalanceOnApeChain('0x...');
-console.log(`USDC Balance on ApeChain: ${(parseFloat(usdcBalance) / 1e6).toFixed(2)} USDC`);
+// Check viewer's USDC balance on Base Sepolia (testnet destination)
+const usdcBalance = await sdk.getViewerUsdcBalanceOnApeChain('0x65dF34504D2a5D96f4478544D5279B12b3fbEA87');
+console.log(`USDC Balance on Base Sepolia: ${(parseFloat(usdcBalance) / 1e6).toFixed(2)} USDC`);
 ```
 
 ### 6. Token Balance and Approval Methods
 
 ```typescript
-// Get native token balance for a wallet
-const balance = await sdk.getNativeBalance('0x...', SUPPORTED_CHAINS.POLYGON);
-console.log(`Balance: ${(parseFloat(balance) / 1e18).toFixed(4)} MATIC`);
+// Get native token balance for a wallet (testnet example)
+const balance = await sdk.getNativeBalance('0x65dF34504D2a5D96f4478544D5279B12b3fbEA87', 421614);
+console.log(`Balance: ${(parseFloat(balance) / 1e18).toFixed(4)} ETH`);
 
-// Get ERC20 token balance
+// Get ERC20 token balance (testnet USDC)
 const tokenBalance = await sdk.getTokenBalance(
-  '0x...', // wallet address
-  '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174', // USDC on Polygon
-  SUPPORTED_CHAINS.POLYGON
+  '0x65dF34504D2a5D96f4478544D5279B12b3fbEA87', // test wallet address
+  '0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d', // USDC on Arbitrum Sepolia
+  421614 // Arbitrum Sepolia
 );
 console.log(`USDC Balance: ${(parseFloat(tokenBalance) / 1e6).toFixed(2)} USDC`);
 
 // Get multiple token balances at once
 const balances = await sdk.getMultipleTokenBalances(
-  '0x...', 
-  ['native', '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174'], // Native + USDC
-  SUPPORTED_CHAINS.POLYGON
+  '0x65dF34504D2a5D96f4478544D5279B12b3fbEA87', 
+  ['native', '0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d'], // Native + USDC on Arbitrum Sepolia
+  421614
 );
 console.log(`Balances:`, balances);
 
-// Check if token approval is needed
+// Check if token approval is needed (testnet example)
 const needsApproval = await sdk.needsApproval(
-  '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174', // USDC
-  '0xOwnerAddress',
-  '0xSpenderContractAddress',
+  '0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d', // USDC on Arbitrum Sepolia
+  '0x65dF34504D2a5D96f4478544D5279B12b3fbEA87',
+  '0x2b50C16877a3E262e0D5B9a4B9f7517634Ba27d8', // TippingChain contract
   '1000000', // 1 USDC in smallest units
-  SUPPORTED_CHAINS.POLYGON
+  421614 // Arbitrum Sepolia
 );
 
 // Approve token spending
 const approval = await sdk.approveToken(
-  '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174', // USDC
-  '0xSpenderContractAddress',
+  '0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d', // USDC on Arbitrum Sepolia
+  '0x2b50C16877a3E262e0D5B9a4B9f7517634Ba27d8', // TippingChain contract
   '1000000', // 1 USDC
-  SUPPORTED_CHAINS.POLYGON
+  421614
 );
 
 // Approve unlimited token spending
 const maxApproval = await sdk.approveTokenMax(
-  '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174', // USDC
-  '0xSpenderContractAddress',
-  SUPPORTED_CHAINS.POLYGON
+  '0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d', // USDC on Arbitrum Sepolia
+  '0x2b50C16877a3E262e0D5B9a4B9f7517634Ba27d8', // TippingChain contract
+  421614
 );
 ```
 
 ### 7. Advanced Admin and Relay Management (NEW!)
 
 ```typescript
-// Add an authorized relayer for cross-chain operations (admin only)
-await sdk.addAuthorizedRelayer('0xRelayerAddress', SUPPORTED_CHAINS.POLYGON);
+// Add an authorized relayer for cross-chain operations (admin only) - testnet example
+await sdk.addAuthorizedRelayer('0x29aE0362FcF55cc646fD83B6E0DeB433FF7e019b', 421614);
 
 // Remove an authorized relayer (admin only)
-await sdk.removeAuthorizedRelayer('0xRelayerAddress', SUPPORTED_CHAINS.POLYGON);
+await sdk.removeAuthorizedRelayer('0xRelayerAddress', 421614);
 
-// Manually relay pending ETH to ApeChain (admin only)
-await sdk.manualRelayETH(SUPPORTED_CHAINS.POLYGON);
+// Manually relay pending ETH to Base Sepolia (admin only)
+await sdk.manualRelayETH(421614); // Arbitrum Sepolia
 
-// Manually relay pending token to ApeChain (admin only)
-await sdk.manualRelayToken('0xTokenAddress', SUPPORTED_CHAINS.POLYGON);
+// Manually relay pending token to Base Sepolia (admin only)
+await sdk.manualRelayToken('0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d', 421614); // USDC
 
 // Set auto-relay mode for cross-chain operations (admin only)
-await sdk.setAutoRelay(true, SUPPORTED_CHAINS.POLYGON);
+await sdk.setAutoRelay(true, 421614);
 ```
 
 ### 8. Contract State Management (NEW!)
 
 ```typescript
-// Pause contract operations (admin only)
-await sdk.pause(SUPPORTED_CHAINS.POLYGON);
+// Pause contract operations (admin only) - testnet example
+await sdk.pause(421614); // Arbitrum Sepolia
 
 // Unpause contract operations (admin only)
-await sdk.unpause(SUPPORTED_CHAINS.POLYGON);
+await sdk.unpause(421614);
 
 // Perform an emergency withdrawal of funds (admin only)
-await sdk.emergencyWithdraw(SUPPORTED_CHAINS.POLYGON);
+await sdk.emergencyWithdraw(421614);
 ```
 
 ### 9. Advanced Stats and Queries (NEW!)
 
 ```typescript
-// Get ApeChain-specific statistics
-const apeStats = await sdk.getApeChainStats(SUPPORTED_CHAINS.APECHAIN);
-console.log(`Total USDC on ApeChain: ${apeStats.totalUsdc}`);
-console.log(`Total from Chain: ${apeStats.totalFromChain}`);
+// Get Base Sepolia-specific statistics (testnet destination)
+const destStats = await sdk.getApeChainStats(84532); // Base Sepolia
+console.log(`Total USDC on Base Sepolia: ${destStats.totalUsdc}`);
+console.log(`Total from Chain: ${destStats.totalFromChain}`);
 
-// Get all active creators with pagination
-const activeCreators = await sdk.getAllActiveCreators(0, 10, SUPPORTED_CHAINS.POLYGON);
+// Get all active creators with pagination (testnet example)
+const activeCreators = await sdk.getAllActiveCreators(0, 10, 421614); // Arbitrum Sepolia
 console.log(`Total Active Creators: ${activeCreators.totalActive}`);
 console.log(`Creator IDs: ${activeCreators.creatorIds}`);
 console.log(`Wallets: ${activeCreators.wallets}`);
 console.log(`Tip Amounts: ${activeCreators.tipAmounts}`);
 
 // Get information for multiple creators by IDs
-const creatorsInfo = await sdk.getCreatorsByIds([1, 2, 3], SUPPORTED_CHAINS.POLYGON);
+const creatorsInfo = await sdk.getCreatorsByIds([1], 421614); // Creator #1 on testnet
 console.log(`Tip Amounts: ${creatorsInfo.tipAmounts}`);
 console.log(`Wallets: ${creatorsInfo.wallets}`);
 console.log(`Active Status: ${creatorsInfo.activeStatus}`);
@@ -307,13 +308,30 @@ console.log(`Active Status: ${creatorsInfo.activeStatus}`);
 | **ApeChain** | **33139** | **APE** | **Destination** |
 
 ### Testnet Chains
-| Chain | Chain ID | Native Token | Type |
-|-------|----------|--------------|------|
-| Ethereum Holesky | 17000 | ETH | Source |
-| Polygon Amoy | 80002 | MATIC | Source |
-| **ApeChain Curtis** | **33111** | **APE** | **Destination** |
 
-*Note: Testnet support replaces deprecated Sepolia (11155111) and Mumbai (80001) networks.*
+**Active Testnet Configuration:**
+
+| Chain | Chain ID | Native Token | Type | Contract Address |
+|-------|----------|--------------|------|-----------------|
+| **Arbitrum Sepolia** | **421614** | **ETH** | **Source** | `0x2b50C16877a3E262e0D5B9a4B9f7517634Ba27d8` |
+| **Base Sepolia** | **84532** | **ETH** | **Destination** | `0x2b50C16877a3E262e0D5B9a4B9f7517634Ba27d8` |
+| Polygon Amoy | 80002 | MATIC | Source (additional) | Available |
+
+**Testnet Network Details:**
+
+**Arbitrum Sepolia:**
+- RPC: https://sepolia-rollup.arbitrum.io/rpc
+- Explorer: https://sepolia.arbiscan.io
+- Faucet: https://faucet.quicknode.com/arbitrum/sepolia
+- USDC: `0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d`
+
+**Base Sepolia:**
+- RPC: https://sepolia.base.org
+- Explorer: https://sepolia.basescan.org
+- Faucet: https://faucet.quicknode.com/base/sepolia
+- USDC: `0x036CbD53842c5426634e7929541eC2318f3dCF7e`
+
+*Note: Current testnet setup uses Arbitrum Sepolia → Base Sepolia for end-to-end cross-chain testing with real Relay.link bridging.*
 
 ## Fee Structure
 
