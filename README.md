@@ -1,8 +1,8 @@
 # @tippingchain/sdk
 
-TypeScript SDK for TippingChain v2.6.0 - a unified multi-chain tipping platform with integrated Relay.link bridging, creator registry, and viewer rewards. Enable users to tip content creators using creator IDs from 9 source chains with automatic USDC payouts on ApeChain.
+TypeScript SDK for TippingChain v2.6 - a unified multi-chain tipping platform with integrated Relay.link bridging, creator registry, and viewer rewards. Enable users to tip content creators using creator IDs from 9 source chains with automatic USDC payouts on ApeChain.
 
-## Version 2.6.0 Updates
+## Version 2.6 Updates
 
 - ✨ **Updated Testnet Support**: Complete migration from deprecated Holesky/Curtis to active Arbitrum Sepolia (421614) and Base Sepolia (84532)
 - 🌐 **Enhanced Chain Definitions**: Updated all chain configurations with current testnet networks and proper RPC endpoints
