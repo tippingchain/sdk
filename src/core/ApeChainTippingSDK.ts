@@ -114,7 +114,7 @@ export class ApeChainTippingSDK {
     
     this.config = config;
     this.client = createThirdwebClient({ clientId: config.clientId });
-    this.relayService = new ApeChainRelayService();
+    this.relayService = new ApeChainRelayService(config.useTestnet || false);
     
     // Initialize real-time services
     this.transactionStatus = new TransactionStatusService(this.client);

@@ -753,11 +753,15 @@ interface QuoteRequestParams {
 }
 declare class ApeChainRelayService {
     private readonly APECHAIN_ID;
+    private readonly BASE_SEPOLIA_ID;
     private readonly USDC_TOKEN_ADDRESS;
+    private readonly BASE_SEPOLIA_USDC;
     private readonly baseUrl;
+    private readonly isTestnet;
+    constructor(isTestnet?: boolean);
     /**
-     * Get a quote for relaying tokens to ApeChain (for estimation purposes)
-     * Note: The actual relay is now handled by the integrated contract
+     * Get a quote for relaying tokens to ApeChain
+     * Makes actual API call to Relay.link for accurate pricing
      */
     getQuote(params: QuoteRequestParams): Promise<RelayQuote>;
     /**
