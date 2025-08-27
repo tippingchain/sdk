@@ -23,11 +23,17 @@ var ApeChainRelayService = class {
     try {
       const destinationChainId = this.isTestnet ? this.BASE_SEPOLIA_ID : this.APECHAIN_ID;
       const destinationToken = this.isTestnet ? this.BASE_SEPOLIA_USDC : this.USDC_TOKEN_ADDRESS;
+      const normalizeTokenForAPI = (token) => {
+        return token === "native" ? "0x0000000000000000000000000000000000000000" : token;
+      };
       const quoteRequest = {
+        user: params.user || "0x0000000000000000000000000000000000000000",
+        recipient: params.recipient,
+        // Optional recipient address
         originChainId: params.fromChainId,
         destinationChainId,
-        originCurrency: params.fromToken,
-        destinationCurrency: destinationToken,
+        originCurrency: normalizeTokenForAPI(params.fromToken),
+        destinationCurrency: normalizeTokenForAPI(destinationToken),
         amount: params.amount,
         tradeType: "EXACT_INPUT"
       };
@@ -81,7 +87,10 @@ var ApeChainRelayService = class {
         fromToken: params.fromToken,
         toChainId: destinationChainId,
         toToken: destinationToken,
-        amount: params.amount
+        amount: params.amount,
+        user: params.userAddress,
+        recipient: params.creatorAddress
+        // Pass creator address as recipient
       });
       return {
         success: true,
@@ -1085,6 +1094,8 @@ var ApeChainTippingSDK = class {
         amount: params.amount,
         creatorAddress: creator.wallet,
         // Use actual creator wallet from registry
+        userAddress: params.userAddress,
+        // User's wallet address for API
         targetToken: "USDC"
         // Target USDC on ApeChain
       });
@@ -1587,6 +1598,7 @@ var ApeChainTippingSDK = class {
         toChainId: contractsInterface.SUPPORTED_CHAINS.APECHAIN,
         toToken: "USDC",
         amount: viewerAmount.toString()
+        // Note: user parameter omitted - will use fallback address in relay service
       });
       const estimatedUsdcAmount = relayQuote.estimatedOutput;
       if (params.viewerId) {
@@ -1731,6 +1743,7 @@ var ApeChainTippingSDK = class {
         toChainId: contractsInterface.SUPPORTED_CHAINS.APECHAIN,
         toToken: "USDC",
         amount: totalToViewers.toString()
+        // Note: user parameter omitted - will use fallback address in relay service
       });
       const estimatedUsdcAmount = relayQuote.estimatedOutput;
       return {

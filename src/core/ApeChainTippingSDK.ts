@@ -64,6 +64,7 @@ export interface TipParams {
   creatorId: number; // NEW: Use creator ID instead of address
   token: string; // address or 'native'
   amount: string;
+  userAddress?: string; // User's wallet address for relay API (optional)
 }
 
 export interface TipResult {
@@ -179,6 +180,7 @@ export class ApeChainTippingSDK {
         fromToken: params.token,
         amount: params.amount,
         creatorAddress: creator.wallet, // Use actual creator wallet from registry
+        userAddress: params.userAddress, // User's wallet address for API
         targetToken: 'USDC' // Target USDC on ApeChain
       });
 
@@ -793,6 +795,7 @@ export class ApeChainTippingSDK {
         toChainId: SUPPORTED_CHAINS.APECHAIN,
         toToken: 'USDC',
         amount: viewerAmount.toString()
+        // Note: user parameter omitted - will use fallback address in relay service
       });
       
       const estimatedUsdcAmount = relayQuote.estimatedOutput;
@@ -970,6 +973,7 @@ export class ApeChainTippingSDK {
         toChainId: SUPPORTED_CHAINS.APECHAIN,
         toToken: 'USDC',
         amount: totalToViewers.toString()
+        // Note: user parameter omitted - will use fallback address in relay service
       });
       
       const estimatedUsdcAmount = relayQuote.estimatedOutput;

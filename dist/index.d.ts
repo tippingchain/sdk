@@ -365,6 +365,7 @@ interface TipParams {
     creatorId: number;
     token: string;
     amount: string;
+    userAddress?: string;
 }
 interface TipResult {
     success: boolean;
@@ -750,6 +751,8 @@ interface QuoteRequestParams {
     toChainId: number;
     toToken: string;
     amount: string;
+    user?: string;
+    recipient?: string;
 }
 declare class ApeChainRelayService {
     private readonly APECHAIN_ID;
@@ -773,6 +776,7 @@ declare class ApeChainRelayService {
         fromToken: string;
         amount: string;
         creatorAddress: string;
+        userAddress?: string;
         targetToken?: string;
     }): Promise<RelayResult>;
     private makeRequest;

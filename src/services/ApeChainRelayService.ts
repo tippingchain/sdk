@@ -28,6 +28,8 @@ export interface QuoteRequestParams {
   toChainId: number;
   toToken: string;
   amount: string;
+  user?: string; // User's wallet address (optional for fallback)
+  recipient?: string; // Recipient address for the funds
 }
 
 export class ApeChainRelayService {
@@ -56,12 +58,19 @@ export class ApeChainRelayService {
       const destinationChainId = this.isTestnet ? this.BASE_SEPOLIA_ID : this.APECHAIN_ID;
       const destinationToken = this.isTestnet ? this.BASE_SEPOLIA_USDC : this.USDC_TOKEN_ADDRESS;
       
+      // Normalize token addresses for API (native -> zero address)
+      const normalizeTokenForAPI = (token: string) => {
+        return token === 'native' ? '0x0000000000000000000000000000000000000000' : token;
+      };
+      
       // Prepare the API request payload
       const quoteRequest = {
+        user: params.user || '0x0000000000000000000000000000000000000000',
+        recipient: params.recipient, // Optional recipient address
         originChainId: params.fromChainId,
         destinationChainId: destinationChainId,
-        originCurrency: params.fromToken,
-        destinationCurrency: destinationToken,
+        originCurrency: normalizeTokenForAPI(params.fromToken),
+        destinationCurrency: normalizeTokenForAPI(destinationToken),
         amount: params.amount,
         tradeType: 'EXACT_INPUT'
       };
@@ -123,6 +132,7 @@ export class ApeChainRelayService {
     fromToken: string;
     amount: string;
     creatorAddress: string;
+    userAddress?: string; // User's wallet address (optional for fallback)
     targetToken?: string;
   }): Promise<RelayResult> {
     try {
@@ -136,6 +146,8 @@ export class ApeChainRelayService {
         toChainId: destinationChainId,
         toToken: destinationToken,
         amount: params.amount,
+        user: params.userAddress,
+        recipient: params.creatorAddress, // Pass creator address as recipient
       });
 
       return {
